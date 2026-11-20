@@ -1,0 +1,29 @@
+# Build directories and compiled artifacts
+build/
+dist/
+out/
+
+# Object files, binaries, modules, and archives
+*.o
+*.d
+*.a
+*.bin
+*.elf
+*.mo
+*.sym
+*.dep
+*.zip
+*.tar.gz
+*.sha256
+
+# Logs and temporary files
+*.log
+*.tmp
+*~
+.DS_Store
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/

@@ -1,0 +1,107 @@
+# M-Film for Canon EOS M2 (Firmware 1.0.3)
+
+[中文文档 (README_CN.md)](./README_CN.md)
+
+A **Magic Lantern** port (based on [`reticulatedpines/magiclantern_simplified`](https://github.com/reticulatedpines/magiclantern_simplified)) with **M-Film v0.2.3** ([`HNGSeries/mfilm-canon-film-simulation`](https://github.com/HNGSeries/mfilm-canon-film-simulation)) film simulation and in-camera RAW darkroom integrated for the **Canon EOS M2** (DIGIC 5 / ARM946E-S, Official Firmware **1.0.3**).
+
+---
+
+## ⚠️ Safety Warning — Read Before Use
+
+> [!CAUTION]
+> - **Firmware 1.0.3 ONLY**: This port is strictly locked to **Canon EOS M2 official firmware `1.0.3`** (`EOSM2.103`). Check your camera's `Firmware Ver. 1.0.3` in Canon's menu before trying anything. Do **not** run this on any other camera model or firmware version.
+> - **Non-Persistent Loading Strongly Recommended**: Always test via Canon's built-in **Menu → Wrench → Firmware Ver. 1.0.3 → Firmware Update** flow. Do **not** enable or write the NVRAM Bootflag during early testing.
+> - **Zero Automatic Bootflag Writes**: All builds in this repository are statically audited (`scripts/verify_m2_safety.py`) to contain zero automatic `EnableBootDisk` / `SetBootFlag` calls and 100% preserved `EOSM2.103` hardware addresses.
+> - **Use at Your Own Risk**: Third-party camera firmware carries inherent risk. If the camera ever freezes or shows a black screen during non-persistent loading, **remove the battery for 5 seconds and reinsert it** to cleanly return to stock Canon firmware.
+
+---
+
+## Key Features
+
+- **Modern Magic Lantern Base (`EOSM2.103`)**: Migrated from the legacy EOS M2 1.0.3 DryOS port onto `magiclantern_simplified` with all 144 active `NSTUB` addresses, VRAM pointers, and `BGMT_*` keycodes preserved intact.
+- **M-Film v0.2.3 External Module (`--module`)**: Runs the Film OS and in-camera CR2→JPEG darkroom as an external module (`ML/modules/filmos.mo`) to stay safely within DIGIC 5's 592 KB (`605,952 B`) fixed boot memory reservation (`537,344 B` used, `67.0 KB` headroom).
+- **Mirrorless HUD & Canon Graphics Hiding**: Inherits EOS M mirrorless optimizations — direct LiveView HUD rendering (skipping DSLR top-plate code) and **`Settings → Advanced → Hide Canon's graphics`** to prevent Canon's exposure scale/icons from drawing over the M-Film HUD.
+- **Two-Stage Release Bundles**:
+  - `01_EOSM2_Clean_ML_Base.zip`: Pure Magic Lantern base for verifying boot, menus, and buttons first.
+  - `02_EOSM2_MFilm_023_TestBuild.zip`: Full M-Film v0.2.3 bundle with darkroom LUTs, fonts, and film samples.
+
+---
+
+## Quick Start (4 Steps)
+
+1. **Verify Firmware & Prepare SD Card**: Confirm your EOS M2 is on official **Firmware 1.0.3**. Format a **≤ 32 GB FAT32** SD card inside the camera and make sure the battery is fully charged.
+2. **Download Release Bundle**: Go to [GitHub Releases](https://github.com/Molinzzj/mfilm-eosm2/releases) and download `01_EOSM2_Clean_ML_Base.zip` (recommended for first-time sanity check) and/or `02_EOSM2_MFilm_023_TestBuild.zip`, and verify the `.sha256` checksum.
+3. **Extract to SD Card Root**: Unzip the archive directly into the **root directory** of the SD card so `autoexec.bin`, `ML-SETUP.FIR`, and the `ML/` folder sit directly at the top level (do not nest inside an extra folder).
+4. **Load via Firmware Update**: Insert the card, switch the mode dial to a still-photo mode (`M` / `Av` / `Tv`), set image quality to **RAW** (required for M-Film's in-camera darkroom), open Canon's menu → **Firmware Ver. 1.0.3 → Firmware Update**, and run a non-persistent boot. Press **Trash / Delete** (or long-press **Down**) in LiveView to open Magic Lantern / M-Film.
+
+For a detailed checklist covering both bundles, see [`docs/REAL_CAMERA_SMOKE_TEST.md`](./docs/REAL_CAMERA_SMOKE_TEST.md).
+
+---
+
+## Repository Layout
+
+```text
+.
+├── platform/EOSM2.103/              # Audited EOS M2 (1.0.3) platform port files
+├── patches/
+│   ├── 01-ml-simplified-eosm2.patch # Minimal EOS M2 patch for magiclantern_simplified
+│   └── 02-mfilm-eosm2.patch         # Minimal EOS M2 patch for M-Film v0.2.3
+├── scripts/
+│   ├── build_all.sh                 # Reproducible upstream clone + patch + build script
+│   └── verify_m2_safety.py          # 5-gate static/binary safety & ZIP auditor
+├── docs/
+│   ├── REAL_CAMERA_SMOKE_TEST.md    # Two-step real-camera smoke test guide
+│   └── SAFETY_AUDIT_REPORT.md       # Static & binary audit report (PASS)
+├── LICENSE                          # GNU General Public License v2.0
+├── README.md                        # English documentation
+└── README_CN.md                     # Chinese documentation
+```
+
+---
+
+## How to Build from Source
+
+### Prerequisites
+
+- **ARM Toolchain**: `arm-none-eabi-gcc` (tested with xPack GNU Arm Embedded GCC `12.3.1-1.2`)
+- **Host Tools**: `gcc`, `make`, `git`, `python3`, `zip`, `unzip`
+- **Python 3 Packages**: `docutils`, `setuptools`, `numpy`, `segno`
+
+### One-Command Reproducible Build
+
+```bash
+git clone https://github.com/Molinzzj/mfilm-eosm2.git
+cd mfilm-eosm2
+./scripts/build_all.sh
+```
+
+`scripts/build_all.sh` automatically:
+1. Clones `reticulatedpines/magiclantern_simplified` (pinned commit `142472e9`) and `HNGSeries/mfilm-canon-film-simulation` (pinned commit `3c3986dd`, v0.2.3).
+2. Copies `platform/EOSM2.103/` and applies `patches/01-ml-simplified-eosm2.patch`.
+3. Builds `dist/01_EOSM2_Clean_ML_Base.zip`.
+4. Applies `patches/02-mfilm-eosm2.patch` and runs M-Film's `build_fork.sh EOSM2.103 --module`.
+5. Packages `dist/02_EOSM2_MFilm_023_TestBuild.zip` and generates `.sha256` files.
+
+### Run the Safety Audit
+
+```bash
+python3 scripts/verify_m2_safety.py dist/02_EOSM2_MFilm_023_TestBuild.zip
+```
+
+See [`docs/SAFETY_AUDIT_REPORT.md`](./docs/SAFETY_AUDIT_REPORT.md) for the full 5-gate audit output.
+
+---
+
+## Credits & Upstream Projects
+
+This project stands on the shoulders of the Magic Lantern and M-Film communities:
+
+- **[`HNGSeries/mfilm-canon-film-simulation`](https://github.com/HNGSeries/mfilm-canon-film-simulation)** — M-Film (v0.2.3) film simulation OS, blind-shooting workflow, low-memory HUD, Canon graphics hiding, and in-camera CR2 darkroom.
+- **[`reticulatedpines/magiclantern_simplified`](https://github.com/reticulatedpines/magiclantern_simplified)** — Modernized Magic Lantern codebase and build system.
+- **Bilal / [`ccritix/magic-lantern`](https://github.com/ccritix/magic-lantern)** — Original Canon EOS M2 (Firmware 1.0.3) DryOS port, `stubs.S` address table, `consts.h` VRAM constants, and `gui.h` button mappings.
+
+---
+
+## License
+
+Licensed under the **GNU General Public License v2.0 (GPL-2.0)** — see [`LICENSE`](./LICENSE) for the full text, consistent with Magic Lantern and M-Film.

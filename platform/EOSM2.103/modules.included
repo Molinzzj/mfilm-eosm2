@@ -1,0 +1,13 @@
+# Module names in this file will be included in the cam magiclantern.zip
+# Heavy RAW video modules (mlv_lite, mlv_play, mlv_snd, crop_rec, etc.) are intentionally omitted
+# to conserve DIGIC 5 boot memory for M-Film 0.2.0+ integration.
+autoexpo
+bench
+deflick
+dual_iso
+ettr
+file_man
+img_name
+pic_view
+selftest
+silent

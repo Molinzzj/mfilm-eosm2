@@ -1,0 +1,211 @@
+diff --git a/platform/Makefile b/platform/Makefile
+index ae797fc..95af1b0 100644
+--- a/platform/Makefile
++++ b/platform/Makefile
+@@ -93,6 +93,7 @@ ML_CAMS = \
+     80D.103 \
+     850D.100 \
+     EOSM.202 \
++    EOSM2.103 \
+     M6II.111 \
+     M50.110 \
+     R.180 \
+diff --git a/src/bmp.c b/src/bmp.c
+index b63f332..b60e04d 100755
+--- a/src/bmp.c
++++ b/src/bmp.c
+@@ -94,7 +94,7 @@
+     /** Returns a pointer to idle BMP vram */
+     uint8_t* bmp_vram_idle()
+     {
+-    #if defined(CONFIG_1100D) || defined(CONFIG_100D) // This fixes "dirty" LCD output for 100D
++    #if defined(CONFIG_1100D) || defined(CONFIG_100D) || defined(CONFIG_EOSM2) // This fixes "dirty" LCD output for 100D/EOSM2
+         return (uint8_t *)((((uintptr_t)bmp_vram_real() + 0x80000) ^ 0x80000) - 0x80000);
+     #else
+         return (uint8_t *)((uintptr_t)bmp_vram_real() ^ 0x80000);
+diff --git a/src/boot-d45-am.c b/src/boot-d45-am.c
+index 2201e76..a06d9a4 100755
+--- a/src/boot-d45-am.c
++++ b/src/boot-d45-am.c
+@@ -124,9 +124,9 @@ init_task_func init_task_patched(void)
+         while(1);                                       /* refuse to boot */
+     }
+ 
+-    #if defined(CONFIG_6D) || defined(CONFIG_100D) || defined(CONFIG_70D)
++    #if defined(CONFIG_6D) || defined(CONFIG_100D) || defined(CONFIG_70D) || defined(CONFIG_EOSM2)
+     /* R0: 0x44C000 (start address, easier to patch, change to 0x4E0000 => reserve 592K for ML) */
+-    /* R1: 0xD3C000 [6D, 70D] / 0xC3C000 [100D] (end address, unchanged) */
++    /* R1: 0xD3C000 [6D, 70D] / 0xC3C000 [100D] / 0xC2A000 [EOSM2] (end address, unchanged) */
+     addr_AllocMem_end[1] = MOV_R0_0x4E0000_INSTR;
+     ml_reserved_mem = 0x4E0000 - RESTARTSTART;
+     #elif defined(CONFIG_550D) || defined(CONFIG_600D)
+diff --git a/src/edmac-memcpy.c b/src/edmac-memcpy.c
+index 9771d9d..d7363e7 100644
+--- a/src/edmac-memcpy.c
++++ b/src/edmac-memcpy.c
+@@ -24,6 +24,9 @@ uint32_t edmac_read_chan = 0x19;
+ uint32_t edmac_write_chan = 0x13;
+ //~ r 2 3 5 7 8 9 10 11-13
+ //~ w 3 4 6 10 11-15
++#elif defined(CONFIG_EOSM2)
++uint32_t edmac_read_chan = 0x19;  /* Read:  0x0A 0x0B 0x0D 0x19 0x1A 0x1B 0x1C 0x1D */
++uint32_t edmac_write_chan = 0x13; /* Write: 0x03 0x04 0x06 0x13 0x14 0x15 0x16 */
+ #elif defined(CONFIG_60D)
+ uint32_t edmac_read_chan = 0x19;  /* free indices: 2, 3, 4, 5, 6, 7, 8, 9 */
+ uint32_t edmac_write_chan = 0x06; /* 1, 4, 6, 10 */
+diff --git a/src/fps-engio.c b/src/fps-engio.c
+index 9c5ab45..0ff2abe 100755
+--- a/src/fps-engio.c
++++ b/src/fps-engio.c
+@@ -268,6 +268,11 @@ static void fps_read_current_timer_values();
+     #define FPS_TIMER_B_MIN ( \
+     RECORDING_H264 ? (MV1080CROP ? 1750 : MV720 ? 990 : 1970) \
+                    : (ZOOM || MV1080CROP ? 1336 : 1970))
++#elif defined(CONFIG_EOSM2) // using 100D values as in original EOSM2 port
++    #define TG_FREQ_BASE 32000000
++    #define FPS_TIMER_A_MIN (ZOOM ? 676 : MV1080CROP ? 540 : 520)
++    #undef FPS_TIMER_B_MIN
++    #define FPS_TIMER_B_MIN (ZOOM || MV1080 || MV1080CROP ? 1288 : MV720 || (lv && lv_dispsize==1 && !is_movie_mode()) ? 990 : 1970)
+ #elif defined(CONFIG_6D)
+     #define TG_FREQ_BASE 25600000
+     #define FPS_TIMER_A_MIN (fps_timer_a_orig - (ZOOM ? 22 : MV720 ? 10 : 34) ) //, ZOOM ? 708 : 512)
+diff --git a/src/fw-signature.h b/src/fw-signature.h
+index 3be5731..74e6042 100755
+--- a/src/fw-signature.h
++++ b/src/fw-signature.h
+@@ -41,6 +41,7 @@
+ #define SIG_80D_103  0x98ec1433 // from FE0A0000
+ #define SIG_850D_100 0xad55d877 // from e0040000
+ #define SIG_EOSM_202 0x2D7c6dcf // from FF0C0000
++#define SIG_EOSM2_103 0x1f321405 // from FF0C0000
+ //#define SIG_M50_102  0x3b70901c // from E0040000
+ #define SIG_M50_110  0x05EDBC80 // from E0040000
+ #define SIG_M6II_111 0x3438de7d // from E0040000
+diff --git a/src/lens.c b/src/lens.c
+index 7fd35a5..7765362 100644
+--- a/src/lens.c
++++ b/src/lens.c
+@@ -1061,8 +1061,8 @@ lens_take_picture(
+     // in some cases, the MLU setting is ignored; if ML can't detect this properly, this call will actually take a picture
+     // if it happens (e.g. with LV active, but camera in QR mode), that's it, we won't try taking another one
+     // side effects should be minimal
+-#if defined(CONFIG_EOSM)
+-    call("Release"); //EOSM is mirrorless no need to check for MLU
++#if defined(CONFIG_EOSM) || defined(CONFIG_EOSM2)
++    call("Release"); //EOSM/EOSM2 is mirrorless no need to check for MLU
+     goto end;
+ #else
+     int took_pic = mlu_lock_mirror_if_needed();
+diff --git a/src/lens.h b/src/lens.h
+index b5ef13d..c88f26c 100644
+--- a/src/lens.h
++++ b/src/lens.h
+@@ -101,7 +101,8 @@ extern struct lens_info lens_info;
+ #define DOF_DIFFRACTION_LIMIT_REACHED 1
+ 
+ #if defined(CONFIG_6D) || defined(CONFIG_5D3_123) || defined(CONFIG_100D) || defined(CONFIG_750D) \
+-    || defined(CONFIG_80D) || defined(CONFIG_7D2) || defined(CONFIG_70D) || defined(CONFIG_5D4)
++    || defined(CONFIG_80D) || defined(CONFIG_7D2) || defined(CONFIG_70D) || defined(CONFIG_5D4) \
++    || defined(CONFIG_EOSM2)
+ struct prop_lv_lens
+ {
+         uint32_t                lens_rotation; // Identical Doesn't Change
+diff --git a/src/menu.c b/src/menu.c
+index 7c0f3b8..d5bef4c 100755
+--- a/src/menu.c
++++ b/src/menu.c
+@@ -6258,7 +6258,7 @@ static struct longpress q_longpress = {
+ };
+ #endif
+ 
+-#if defined(CONFIG_EOSM)
++#if defined(CONFIG_EOSM) || defined(CONFIG_EOSM2)
+ static struct longpress erase_longpress = {
+     .long_btn_press     = BGMT_TRASH,           /* long press (500ms) opens ML menu */
+     .short_btn_press    = BGMT_PRESS_DOWN,      /* short press => do a regular "down/erase" */
+@@ -6482,7 +6482,7 @@ int handle_longpress_events(struct event * event)
+     }
+ #endif
+ 
+-#if defined(CONFIG_EOSM)
++#if defined(CONFIG_EOSM) || defined(CONFIG_EOSM2)
+     /* also trigger menu by a long press on ERASE (DOWN) */
+     if (event->param == BGMT_PRESS_DOWN)
+     {
+diff --git a/src/menuindex.c b/src/menuindex.c
+index 4d3d3fc..c1f02af 100644
+--- a/src/menuindex.c
++++ b/src/menuindex.c
+@@ -52,7 +52,7 @@ static struct menu_entry help_menus[] = {
+         #elif defined(CONFIG_5DC) || defined(CONFIG_40D)
+         .name = "Press JUMP / PLAY",
+         .choices = CHOICES("Open submenu (Q)"),
+-        #elif defined(CONFIG_EOSM)
++        #elif defined(CONFIG_EOSM) || defined(CONFIG_EOSM2)
+         .name = "Tap or press PLAY",
+         .choices = CHOICES("Open submenu (Q)"),
+         #elif defined(CONFIG_100D)
+diff --git a/src/property.h b/src/property.h
+index 61d810f..dbe5339 100644
+--- a/src/property.h
++++ b/src/property.h
+@@ -109,7 +109,7 @@
+ #define PROP_HALF_SHUTTER       0x8005000a // two bytes, 1==held; only updated in LV mode
+ #define PROP_ORIENTATION        0x8005000d // 0 == 0 deg, 1 == +90 deg, 2 == -90 deg
+ #define PROP_LV_LENS_DRIVE_REMOTE 0x80050013 // what values?!
+-#ifdef CONFIG_EOSM
++#if defined(CONFIG_EOSM) || defined(CONFIG_EOSM2)
+ #define PROP_LV_FOCAL_DISTANCE 0x80050045
+ #endif
+ 
+diff --git a/src/raw.c b/src/raw.c
+index a7796d0..6ed883e 100755
+--- a/src/raw.c
++++ b/src/raw.c
+@@ -162,7 +162,7 @@ static volatile struct edmac_mmio *raw_lv_edmac = (struct edmac_mmio *)RAW_LV_ED
+ #define RAW_PHOTO_EDMAC 0xc0f04208
+ #endif
+ 
+-#if defined(CONFIG_5D3) || defined(CONFIG_700D) || defined(CONFIG_6D) || defined(CONFIG_EOSM) || defined(CONFIG_650D) || defined(CONFIG_70D) || defined(CONFIG_100D)
++#if defined(CONFIG_5D3) || defined(CONFIG_700D) || defined(CONFIG_6D) || defined(CONFIG_EOSM) || defined(CONFIG_EOSM2) || defined(CONFIG_650D) || defined(CONFIG_70D) || defined(CONFIG_100D)
+ #define RAW_PHOTO_EDMAC 0xc0f04008
+ #endif
+ 
+@@ -335,7 +335,7 @@ static int get_default_white_level()
+     -1774, 10000,     3178, 10000,    7005, 10000
+ #endif
+ 
+-#if defined(CONFIG_650D) || defined(CONFIG_EOSM) || defined(CONFIG_700D) || defined(CONFIG_100D) // Same sensor
++#if defined(CONFIG_650D) || defined(CONFIG_EOSM) || defined(CONFIG_EOSM2) || defined(CONFIG_700D) || defined(CONFIG_100D) // Same sensor
+     //~ { "Canon EOS 650D", 0, 0x354d,
+     //~ { "Canon EOS M", 0, 0,
+     //~ { 6602,-841,-939,-4472,12458,2247,-975,2039,6148 } },
+@@ -664,6 +664,10 @@ static int dynamic_ranges[] = {1100, 1094, 1060, 1005, 919, 826, 726, 633};
+ static int dynamic_ranges[] = {1060, 1063, 1037, 982, 901, 831, 718, 622, 536};
+ #endif
+ 
++#ifdef CONFIG_EOSM2
++static int dynamic_ranges[] = {1068, 1076, 1041, 986, 899, 819, 713, 627, 518};
++#endif
++
+ #ifdef CONFIG_7D
+ static int dynamic_ranges[] = {1112, 1108, 1076, 1010, 902, 826, 709, 622};
+ #endif
+@@ -1170,7 +1174,7 @@ int raw_update_params_work()
+         skip_top = 54;
+         #endif
+ 
+-        #if defined(CONFIG_650D) || defined(CONFIG_EOSM) || defined(CONFIG_700D) || defined(CONFIG_100D)
++        #if defined(CONFIG_650D) || defined(CONFIG_EOSM) || defined(CONFIG_EOSM2) || defined(CONFIG_700D) || defined(CONFIG_100D)
+         skip_left = 72;
+         skip_top = 52;
+         #endif
+@@ -1226,7 +1230,7 @@ int raw_update_params_work()
+         raw_capture_info.binning_x  = 3; raw_capture_info.skipping_x = 0;
+ #ifdef CONFIG_5D3
+         raw_capture_info.skipping_y = 0; raw_capture_info.binning_y  = mv720 ? 5 : 3;
+-#elif defined(CONFIG_EOSM)
++#elif defined(CONFIG_EOSM) || defined(CONFIG_EOSM2)
+         raw_capture_info.binning_y  = 1; raw_capture_info.skipping_y = (mv720 || !RECORDING_H264) ? 4 : 2;
+ #else
+         raw_capture_info.binning_y  = 1; raw_capture_info.skipping_y = mv720 ? 4 : 2;

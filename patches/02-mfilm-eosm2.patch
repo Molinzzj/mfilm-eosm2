@@ -1,0 +1,151 @@
+diff --git a/ml-dev/build_fork.sh b/ml-dev/build_fork.sh
+index c26e874..00bbe1f 100644
+--- a/ml-dev/build_fork.sh
++++ b/ml-dev/build_fork.sh
+@@ -149,8 +149,8 @@ if [ -n "$MODULE" ]; then
+         --keep-global-symbol=filmos_overlays "$MOD/build/filmos.mo"
+     # libgcc's and libm's unwind tables: Magic Lantern's TCC crashes loading them, and the camera
+     # hangs in its module loader with no film OS and no Modules tab (#46, #48). Nothing unwinds here.
+-    arm-none-eabi-objcopy --remove-section=.ARM.exidx --remove-section=.rel.ARM.exidx \
+-        --remove-section=.ARM.extab "$MOD/build/filmos.mo"
++    arm-none-eabi-objcopy --remove-section='.ARM.exidx*' --remove-section='.rel.ARM.exidx*' \
++        --remove-section='.ARM.extab*' --remove-section='.rel.ARM.extab*' "$MOD/build/filmos.mo"
+     if arm-none-eabi-readelf -SW "$MOD/build/filmos.mo" | grep -q "\.ARM\.ex"; then
+         echo "the film OS module still has unwind tables, which the camera's loader can't load"; exit 1
+     fi
+@@ -189,6 +189,7 @@ if [ -n "$MODULE" ]; then
+ fi
+ 
+ # the film OS fonts, loaded from the card after boot
++mkdir -p "$HOME/ml"
+ gcc -O2 -I"$HERE/filmos" -o "$HOME/ml/fontblob" "$HERE/filmos/tools/fontblob.c"
+ mkdir -p "$OUT/ML/data"
+ "$HOME/ml/fontblob" "$OUT/ML/data/FOSFONT.BIN"
+@@ -241,7 +242,9 @@ fi
+ # filmos/ and fork/src/ with apply_fork.py are what builds it. Only this
+ # camera's platform files are in it (an ML checkout keeps the ones earlier
+ # builds applied for other cameras).
+-PATCH="$HERE/out/film-mode-$PLAT$TAG.patch"
+-(cd "$SRC" && git add -A src/filmroll.c src/filmroll.h src/filmhook.c src/fos*.c $(ls src/fos*.h | grep -v fos_version.h) \
+-    && git diff ed3e7c0df -- src "platform/$PLAT" modules/Makefile > "$PATCH")
+-echo "patch: $PATCH"
++if [ -d "$SRC/.git" ]; then
++    PATCH="$HERE/out/film-mode-$PLAT$TAG.patch"
++    (cd "$SRC" && git add -A src/filmroll.c src/filmroll.h src/filmhook.c src/fos*.c $(ls src/fos*.h | grep -v fos_version.h) \
++        && git diff ed3e7c0df -- src "platform/$PLAT" modules/Makefile > "$PATCH")
++    echo "patch: $PATCH"
++fi
+diff --git a/ml-dev/cameras.txt b/ml-dev/cameras.txt
+index 8a0da65..e9119c2 100644
+--- a/ml-dev/cameras.txt
++++ b/ml-dev/cameras.txt
+@@ -14,6 +14,7 @@
+ #             (6D: what the fork reserves for ML at boot, see the 6D edit in fork/apply_fork.py;
+ #              100D, 70D, 550D, 600D, 1100D: the fixed reservation of Magic Lantern's boot code, MEMORY.md)
+ EOSM.202      working   727072      Canon EOS M | From 0.2 the film OS loads as a module here too (as on the 550D and 650D), and it starts: tried with 0.2.3, rolls shot and developed in the camera. 0.2 can keep Canon's exposure scale off the viewfinder: *Advanced → Hide Canon's graphics* (#67). | ตั้งแต่ 0.2 film OS โหลดเป็นโมดูลบนรุ่นนี้ด้วย (เหมือน 550D และ 650D) และใช้งานได้: ลองแล้วกับ 0.2.3 ถ่ายและล้างม้วนในกล้องได้ 0.2 ซ่อนสเกลชดเชยแสงของ Canon ที่ทับช่องมองได้ที่ *Advanced → Hide Canon's graphics* (#67)
++EOSM2.103     testing   605952      Canon EOS M2 | Ported on firmware 1.0.3 with the film OS loaded as a module (`ML/modules/filmos.mo`). Uses the fixed 592 KB AllocateMemory boot reservation (`boot-d45-am.c`) and inherits EOS M mirrorless HUD and *Advanced → Hide Canon's graphics* support. | พอร์ตสำหรับเฟิร์มแวร์ 1.0.3 แบบโหลด film OS เป็นโมดูล (`ML/modules/filmos.mo`) ใช้การจองหน่วยความจำบูต 592 KB (`boot-d45-am.c`) และรองรับ HUD แบบมิเรอร์เลสกับ *Advanced → Hide Canon's graphics* เช่นเดียวกับ EOS M
+ 100D.101      working  605952      Canon EOS 100D / Rebel SL1 / Kiss X7 | Works, the film OS as a module since 0.1.5 (#48). 0.1.6 as first released (8 Nov) flickered and took no buttons: fixed in the zips rebuilt on 9 Nov and in 0.2, and its tester says it works again (#73). | ใช้ได้ แบบ film OS เป็นโมดูลตั้งแต่ 0.1.5 (#48) 0.1.6 ชุดแรก (8 พ.ย.) ชั้นฟิล์มกะพริบและกดปุ่มไม่ได้ แก้แล้วใน zip ที่ build ใหม่เมื่อ 9 พ.ย. และใน 0.2 ผู้ทดสอบยืนยันว่ากลับมาใช้ได้ (#73)
+ 650D.104      working  689664      Canon EOS 650D / Rebel T4i / Kiss X6i | Works with the film OS as a module, darkroom included (#54). From 0.1.3 to 0.1.5 the plain zip came without the darkroom (with it built in, the 650D doesn't start: #34): in 0.1.5, take the `-module.zip`. | ใช้ได้ แบบ film OS เป็นโมดูล ห้องมืดในกล้องครบ (#54) ตั้งแต่ 0.1.3 ถึง 0.1.5 zip ปกติไม่มีห้องมืด (ถ้าห้องมืดอยู่ในตัว 650D เปิดไม่ขึ้น #34) ถ้าใช้ 0.1.5 ให้เอา `-module.zip`
+ 700D.115      issues   -           Canon EOS 700D / Rebel T5i / Kiss X7i | 0.1.5's module build works on a tester's 700D, darkroom included (#19), but M-Film's and Canon's menus still glitch over each other; 0.1.6 holds Canon's screen as the film OS opens, and as it closes back to the HUD: reports wanted. From 0.1.3 to 0.1.5 the plain zip came without the darkroom: in 0.1.5, take the `-module.zip`. | build แบบโมดูลของ 0.1.5 ใช้ได้บน 700D ของผู้ทดสอบ ห้องมืดในกล้องครบ (#19) แต่เมนูของ M-Film กับของ Canon ยังวาดทับกันเป็นบางครั้ง 0.1.6 ยึดจอของ Canon ไว้ตอนเปิด film OS และตอนปิดกลับไปที่ HUD รอรายงาน ตั้งแต่ 0.1.3 ถึง 0.1.5 zip ปกติไม่มีห้องมืด ถ้าใช้ 0.1.5 ให้เอา `-module.zip`
+diff --git a/ml-dev/filmos/fos_hud.c b/ml-dev/filmos/fos_hud.c
+index 5652c30..e6a45e7 100644
+--- a/ml-dev/filmos/fos_hud.c
++++ b/ml-dev/filmos/fos_hud.c
+@@ -491,9 +491,9 @@ void fos_hud_clear(uint8_t *vram, int pitch, int style, const struct fos_hud_pal
+ 
+ /* ---------------------------------------------------------------- the top plate */
+ 
+-/* not on the EOS M: it has no viewfinder to shoot through, and its boot
++/* not on the EOS M / EOS M2: no optical viewfinder to shoot through, and boot
+  * memory is short (MEMORY.md) */
+-#ifndef CONFIG_EOSM
++#if !defined(CONFIG_EOSM) && !defined(CONFIG_EOSM2)
+ 
+ /* What a DSLR shows when you shoot through the viewfinder and the screen
+  * on the back is Canon's settings display: a film camera's top plate in
+diff --git a/ml-dev/fork/apply_fork.py b/ml-dev/fork/apply_fork.py
+index dc53700..2ef9615 100644
+--- a/ml-dev/fork/apply_fork.py
++++ b/ml-dev/fork/apply_fork.py
+@@ -122,14 +122,24 @@ if "lua dropped by film-mode fork" not in p.read_text():
+ # 0x520000 gives 848K. A 6D running ML with 592K had 2192K of the pool
+ # free (1503K while recording RAW), so ~1.9M stays free for Canon.
+ # 100D and 70D keep 0x4E0000.
+-edit("src/boot-d45-am.c",
+-     "    #if defined(CONFIG_6D) || defined(CONFIG_100D) || defined(CONFIG_70D)\n",
+-     "    #if defined(CONFIG_6D)\n"
+-     "    /* film-mode fork: R0 0x44C000 -> 0x520000 => reserve 848K for ML (MOV R0, #0x520000) */\n"
+-     "    addr_AllocMem_end[1] = 0xE3A00852;\n"
+-     "    ml_reserved_mem = 0x520000 - RESTARTSTART;\n"
+-     "    #elif defined(CONFIG_100D) || defined(CONFIG_70D)\n",
+-     "film-mode fork: R0 0x44C000 -> 0x520000")
++if "defined(CONFIG_EOSM2)" in (root / "src/boot-d45-am.c").read_text():
++    edit("src/boot-d45-am.c",
++         "    #if defined(CONFIG_6D) || defined(CONFIG_100D) || defined(CONFIG_70D) || defined(CONFIG_EOSM2)\n",
++         "    #if defined(CONFIG_6D)\n"
++         "    /* film-mode fork: R0 0x44C000 -> 0x520000 => reserve 848K for ML (MOV R0, #0x520000) */\n"
++         "    addr_AllocMem_end[1] = 0xE3A00852;\n"
++         "    ml_reserved_mem = 0x520000 - RESTARTSTART;\n"
++         "    #elif defined(CONFIG_100D) || defined(CONFIG_70D) || defined(CONFIG_EOSM2)\n",
++         "film-mode fork: R0 0x44C000 -> 0x520000")
++else:
++    edit("src/boot-d45-am.c",
++         "    #if defined(CONFIG_6D) || defined(CONFIG_100D) || defined(CONFIG_70D)\n",
++         "    #if defined(CONFIG_6D)\n"
++         "    /* film-mode fork: R0 0x44C000 -> 0x520000 => reserve 848K for ML (MOV R0, #0x520000) */\n"
++         "    addr_AllocMem_end[1] = 0xE3A00852;\n"
++         "    ml_reserved_mem = 0x520000 - RESTARTSTART;\n"
++         "    #elif defined(CONFIG_100D) || defined(CONFIG_70D)\n",
++         "film-mode fork: R0 0x44C000 -> 0x520000")
+ 
+ # 650D, 700D: lean since their no-darkroom builds (0.1.3 to 0.1.5); the module builds testers have tried
+ # on them with the darkroom (#54, #19) are lean too
+diff --git a/ml-dev/fork/src/filmroll.c b/ml-dev/fork/src/filmroll.c
+index 9efa280..5f198bc 100644
+--- a/ml-dev/fork/src/filmroll.c
++++ b/ml-dev/fork/src/filmroll.c
+@@ -157,7 +157,7 @@ static void dbg(const char *fmt, ...)
+  * On the EOS M that is LiveView; a DSLR (100D, 650D, 700D ...) is mostly
+  * shot through its optical viewfinder, so there it is also Canon's shooting
+  * screen with LiveView off. */
+-#ifdef CONFIG_EOSM
++#if defined(CONFIG_EOSM) || defined(CONFIG_EOSM2)
+ #define FOS_LV_ONLY 1
+ #else
+ #define FOS_LV_ONLY 0
+@@ -321,16 +321,21 @@ static void apply_film(int index)
+     prop_request_change_wait(PROP_PICTURE_STYLE, &ps, 4, 1000);
+     msleep(100);
+ 
+-    /* these change the current picture style, so it must be selected first */
+-    lens_set_contrast(f->contrast);
++    /* these change the current picture style, so it must be selected first
++     * (magiclantern_simplified moved these setters from lens.c to picstyle.c) */
++    extern void picstyle_set_current_contrast(int value);
++    extern void picstyle_set_current_sharpness(int value);
++    extern void picstyle_set_current_saturation(int value);
++    extern void picstyle_set_current_color_tone(int value);
++    picstyle_set_current_contrast(f->contrast);
+     msleep(50);
+-    lens_set_sharpness(f->sharpness);
++    picstyle_set_current_sharpness(f->sharpness);
+     msleep(50);
+     if (f->picstyle != PS_MONO)
+     {
+-        lens_set_saturation(f->saturation);
++        picstyle_set_current_saturation(f->saturation);
+         msleep(50);
+-        lens_set_color_tone(f->color_tone);
++        picstyle_set_current_color_tone(f->color_tone);
+         msleep(50);
+     }
+ 
+@@ -998,7 +1003,7 @@ static void ui_overdrawn_check(int at_once)
+     last = now;
+     uint8_t *vram = bmp_vram_real();
+     if (!vram || !DISPLAY_IS_ON) return;
+-    int y0, y1;
++    int y0 = 0, y1 = 0;
+     if (vram_moved(vram))
+     {
+         /* all of ours into the buffer now in front; not again within 300 ms,
