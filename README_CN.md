@@ -21,20 +21,21 @@
 - **现代魔灯底座（`EOSM2.103`）**：将经典 EOS M2 1.0.3 DryOS 端口迁移至 `magiclantern_simplified`，100% 原样保留全部 144 个有效 `NSTUB` 固件地址、显存基址及 `BGMT_*` 按键码。
 - **M-Film v0.2.3 外挂模块模式（`--module`）**：将 Film OS 与机内 CR2→JPEG 暗房编译为外挂模块 `ML/modules/filmos.mo`，严格控制在 DIGIC 5 固定 592 KB（`605,952 B`）开机内存红线内（实际占用 `537,344 B`，剩余 `67.0 KB` 安全余量）。
 - **无反低内存 HUD 与原厂图形屏蔽**：完整继承 EOS M 无反优化 — 跳过单反顶屏代码、采用低开机内存取景器 HUD 直接绘制，并支持 **`Settings → Advanced → Hide Canon's graphics`** 一键屏蔽佳能原厂曝光标尺与图标。
-- **两步验证成品包**：
+- **三阶段测试包（Three-Stage Release Bundles）**：
   - `01_EOSM2_Clean_ML_Base.zip`：纯净魔灯底座，用于先行验证开机、菜单与按键响应。
-  - `02_EOSM2_MFilm_023_TestBuild.zip`：完整 M-Film v0.2.3 测试包（含机内暗房 LUT、字体与胶片样片）。
+  - `02_EOSM2_MFilm_023_TestBuild.zip`：标准 M-Film v0.2.3 测试包（含内置机内暗房 LUT 与胶片预设）。
+  - `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`：M-Film v0.2.3 集成动态外置配置加载器（`fos_extprof`），并在 `ML/MFILM/profiles/` 目录预置 20 款离线烘焙的 SpektraFilm `(SF)` 胶片配置。
 
 ---
 
 ## 快速上手指南（4 步完成）
 
 1. **确认固件并准备 SD 卡**：确认 EOS M2 为官方固件 **1.0.3**，使用满电电池与 **≤ 32 GB 的 FAT32 格式 SD 卡**（建议先在相机内格式化一次）。
-2. **下载成品压缩包**：前往 [GitHub Releases](https://github.com/Molinzzj/mfilm-eosm2/releases) 下载 `01_EOSM2_Clean_ML_Base.zip`（建议首次先测底座）及 `02_EOSM2_MFilm_023_TestBuild.zip`，并核对 `.sha256` 校验值。
-3. **解压至 SD 卡根目录**：将压缩包**直接解压至 SD 卡根目录**，确保根目录直接出现 `autoexec.bin`、`ML-SETUP.FIR` 与 `ML/` 文件夹（切勿多套一层子目录）。
+2. **下载成品压缩包**：前往 [GitHub Releases](https://github.com/Molinzzj/mfilm-eosm2/releases) 下载 `01_EOSM2_Clean_ML_Base.zip`（建议首次先测底座）、`02_EOSM2_MFilm_023_TestBuild.zip` 或 `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`（预置 20 款 `(SF)` 外置胶片配置），并核对 `.sha256` 校验值。
+3. **解压至 SD 卡根目录**：将压缩包**直接解压至 SD 卡根目录**，确保根目录直接出现 `autoexec.bin`、`ML-SETUP.FIR` 与 `ML/` 文件夹（切勿多套一层子目录）。若使用 `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`，解压后还会自动填充 `ML/MFILM/profiles/*.cfg`（20 款 `(SF)` 配置）与 `ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt`，开机进入 M-Film 选卷架即可直接选用。
 4. **通过固件升级安全加载**：插卡开机，将拍摄模式拨盘调至 **M / Av / Tv** 静态照片档，在佳能菜单中将画质设为 **RAW**（机内暗房必需），进入 **固件版本 1.0.3 → 固件升级** 执行非持久化加载。进入实时取景后按 **垃圾桶 / 删除键**（或长按向下键）即可呼出 Magic Lantern / M-Film。
 
-详细的两步实机测试检查清单请参阅 [`docs/REAL_CAMERA_SMOKE_TEST.md`](./docs/REAL_CAMERA_SMOKE_TEST.md)。
+详细的实机测试检查清单请参阅 [`docs/REAL_CAMERA_SMOKE_TEST.md`](./docs/REAL_CAMERA_SMOKE_TEST.md)。
 
 ---
 
@@ -42,19 +43,22 @@
 
 ```text
 .
-├── platform/EOSM2.103/              # 审计通过的 EOS M2 (1.0.3) 平台源码目录
+├── platform/EOSM2.103/                  # 审计通过的 EOS M2 (1.0.3) 平台源码目录
 ├── patches/
-│   ├── 01-ml-simplified-eosm2.patch # 针对 magiclantern_simplified 的最小化补丁
-│   └── 02-mfilm-eosm2.patch         # 针对 M-Film v0.2.3 的最小化补丁
+│   ├── 01-ml-simplified-eosm2.patch     # 针对 magiclantern_simplified 的最小化补丁
+│   ├── 02-mfilm-eosm2.patch             # 针对 M-Film v0.2.3 的最小化补丁
+│   └── 03-mfilm-extprof-loader.patch    # 净室 GPL-2.0 外置 .cfg 胶片加载器补丁 (fos_extprof)
 ├── scripts/
-│   ├── build_all.sh                 # 自动拉取上游特定 Commit、打补丁并一键编译脚本
-│   └── verify_m2_safety.py          # 5 项强制硬件地址与零 Bootflag 安全审计脚本
+│   ├── bake_sd_profiles.py              # 宿主机离线黑盒 SpektraFilm 烘焙脚本 -> ML/MFILM/profiles/*.cfg
+│   ├── build_all.sh                     # 自动拉取上游特定 Commit、打补丁并一键编译脚本
+│   └── verify_m2_safety.py              # 6 项静态/二进制安全与协议合规门禁审计脚本
 ├── docs/
-│   ├── REAL_CAMERA_SMOKE_TEST.md    # 两步实机安全冒烟测试指南
-│   └── SAFETY_AUDIT_REPORT.md       # 自动化安全审计报告（PASS）
-├── LICENSE                          # GNU General Public License v2.0 协议全文
-├── README.md                        # 英文主说明文档
-└── README_CN.md                     # 中文说明文档
+│   ├── REAL_CAMERA_SMOKE_TEST.md        # 实机安全冒烟测试指南
+│   ├── SAFETY_AUDIT_REPORT.md           # 自动化安全审计报告（PASS）
+│   └── SPEKTRAFILM_BAKE_REPORT.md       # SpektraFilm 离线烘焙与 ΔE2000 色差评估报告
+├── LICENSE                              # GNU General Public License v2.0 协议全文
+├── README.md                            # 英文主说明文档
+└── README_CN.md                         # 中文说明文档
 ```
 
 ---
@@ -65,9 +69,9 @@
 
 - **ARM 交叉编译器**：`arm-none-eabi-gcc`（已验证版本：xPack GNU Arm Embedded GCC `12.3.1-1.2`）
 - **宿主机工具**：`gcc`、`make`、`git`、`python3`、`zip`、`unzip`
-- **Python 3 依赖**：`docutils`、`setuptools`、`numpy`、`segno`
+- **Python 3 依赖**：`docutils`、`setuptools`、`numpy`、`segno`（若需离线运行 `scripts/bake_sd_profiles.py`，另需 `scipy` 与 `colour-science`）
 
-### 一键复现构建
+### 一键复现构建（`01` 与 `02` 测试包）
 
 ```bash
 git clone https://github.com/Molinzzj/mfilm-eosm2.git
@@ -79,13 +83,33 @@ cd mfilm-eosm2
 1. 拉取官方上游 `reticulatedpines/magiclantern_simplified`（锁定 Commit `142472e9`）与 `HNGSeries/mfilm-canon-film-simulation`（锁定 Commit `3c3986dd`，v0.2.3）。
 2. 复制 `platform/EOSM2.103/` 并应用 `patches/01-ml-simplified-eosm2.patch`。
 3. 编译输出纯净魔灯底座 `dist/01_EOSM2_Clean_ML_Base.zip`。
-4. 应用 `patches/02-mfilm-eosm2.patch` 并执行 M-Film `build_fork.sh EOSM2.103 --module`。
+4. 应用 `patches/02-mfilm-eosm2.patch` 与 `patches/03-mfilm-extprof-loader.patch`（将 `fos_extprof` 编译进 `ML/modules/filmos.mo`），清理 `platform/EOSM2.103/` 后执行 M-Film `build_fork.sh EOSM2.103 --module`。
 5. 打包输出 `dist/02_EOSM2_MFilm_023_TestBuild.zip` 并生成 `.sha256` 校验文件。
+
+### 可选：离线烘焙 SpektraFilm 外置配置包（`03` 测试包）
+
+由于 SpektraFilm 数据资产遵循 **CC BY-SA 4.0** 协议，本 GPL-2.0 源码仓库不提交 `.cfg` 文件。如需在本地生成 `03` 完整测试包，请执行：
+
+```bash
+# 1. 将 SpektraFilm 克隆至本仓库外的独立临时目录
+git clone https://github.com/andreavolpato/spektrafilm.git /tmp/spektrafilm
+
+# 2. 解压 02 包至暂存目录，并向 ML/MFILM/profiles/ 离线烘焙 20 款 (SF) 配置
+mkdir -p /tmp/bundle_03 && unzip -q dist/02_EOSM2_MFilm_023_TestBuild.zip -d /tmp/bundle_03
+python3 scripts/bake_sd_profiles.py \
+  --spektrafilm-src /tmp/spektrafilm/src \
+  --out-dir /tmp/bundle_03/ML/MFILM/profiles \
+  --report docs/SPEKTRAFILM_BAKE_REPORT.md
+
+# 3. 打包生成 03_EOSM2_MFilm_ExtProfiles_TestBuild.zip
+(cd /tmp/bundle_03 && zip -r -9 "${OLDPWD}/dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip" .)
+sha256sum dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip > dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip.sha256
+```
 
 ### 运行静态与二进制安全审计
 
 ```bash
-python3 scripts/verify_m2_safety.py dist/02_EOSM2_MFilm_023_TestBuild.zip
+python3 scripts/verify_m2_safety.py dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip
 ```
 
 完整 6 项安全与协议合规门禁审计结果见 [`docs/SAFETY_AUDIT_REPORT.md`](./docs/SAFETY_AUDIT_REPORT.md)。
@@ -125,6 +149,7 @@ python3 scripts/verify_m2_safety.py dist/02_EOSM2_MFilm_023_TestBuild.zip
 - **[`HNGSeries/mfilm-canon-film-simulation`](https://github.com/HNGSeries/mfilm-canon-film-simulation)** — M-Film (v0.2.3) 胶片模拟操作系统、盲拍防回放、低内存取景器 HUD、原厂图形屏蔽与机内 CR2 暗房引擎。
 - **[`reticulatedpines/magiclantern_simplified`](https://github.com/reticulatedpines/magiclantern_simplified)** — 现代化 Magic Lantern 代码底座与构建系统。
 - **Bilal / [`ccritix/magic-lantern`](https://github.com/ccritix/magic-lantern)** — 原始 Canon EOS M2（1.0.3）DryOS 固件端口、`stubs.S` 地址表、`consts.h` 显存常量及 `gui.h` 按键事件映射。
+- **[`andreavolpato/spektrafilm`](https://github.com/andreavolpato/spektrafilm)** — 光谱胶片模拟参考模型与实测胶片/印相纸数据集（CC BY-SA 4.0），用于通过 `scripts/bake_sd_profiles.py` 离线烘焙外置 `.cfg` 配置文件。
 
 ---
 
