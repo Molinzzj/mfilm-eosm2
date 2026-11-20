@@ -3,8 +3,17 @@ name: Build & Safety Audit
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional GitHub Release tag to attach verified dist/* assets to"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
 
 jobs:
   build-and-audit:
@@ -117,3 +126,19 @@ jobs:
             dist/*.sha256
             docs/SAFETY_AUDIT_REPORT.md
             docs/SPEKTRAFILM_BAKE_REPORT.md
+
+      - name: Attach verified bundles to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          gh release upload "${TAG}" \
+            dist/01_EOSM2_Clean_ML_Base.zip \
+            dist/01_EOSM2_Clean_ML_Base.zip.sha256 \
+            dist/02_EOSM2_MFilm_023_TestBuild.zip \
+            dist/02_EOSM2_MFilm_023_TestBuild.zip.sha256 \
+            dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip \
+            dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip.sha256 \
+            --clobber
+          cat dist/*.sha256
