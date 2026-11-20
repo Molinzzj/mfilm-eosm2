@@ -38,9 +38,3 @@
 
 //#define FEATURE_EYEFI_TRICKS
 //#define FEATURE_JUNKIE_MENU
-
-/* film camera mode (src/filmroll.c) */
-#define FEATURE_FILMROLL
-
-/* film-mode fork: the film OS is a module (build_fork.sh --module) */
-#define FEATURE_FILMOS_MODULE

@@ -34,7 +34,9 @@ for tool in git make gcc arm-none-eabi-gcc arm-none-eabi-objcopy arm-none-eabi-r
     fi
 done
 
-mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
+export ARM_BINPATH="$(dirname "$(command -v arm-none-eabi-gcc)")"
+
+mkdir -p "${BUILD_DIR}" "${DIST_DIR}" "${HOME}/ml"
 
 echo "==> [1/5] Fetching pinned upstream repositories..."
 if [ ! -d "${ML_DIR}/.git" ]; then
@@ -56,7 +58,7 @@ cp -a "${REPO_ROOT}/platform/EOSM2.103" "${ML_DIR}/platform/EOSM2.103"
 git -C "${ML_DIR}" apply --whitespace=nowarn "${REPO_ROOT}/patches/01-ml-simplified-eosm2.patch"
 
 echo "==> [3/5] Building clean Magic Lantern base for EOSM2.103..."
-make -C "${ML_DIR}/platform/EOSM2.103" -j"$(nproc)" zip
+make -C "${ML_DIR}/platform/EOSM2.103" -j"$(nproc)"
 BASE_ZIP="${DIST_DIR}/01_EOSM2_Clean_ML_Base.zip"
 rm -f "${BASE_ZIP}"
 (

@@ -1,0 +1,97 @@
+name: Build & Safety Audit
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-audit:
+    name: Build 3 Bundles, Cross-Model Smoke & 6-Gate Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ARM cross-toolchain and host build tools
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            gcc-arm-none-eabi \
+            binutils-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            gcc \
+            make \
+            git \
+            python3 \
+            python3-pip \
+            zip \
+            unzip
+          arm-none-eabi-gcc --version | head -n 2
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-3.11-mfilm-v1
+          restore-keys: |
+            ${{ runner.os }}-pip-3.11-
+
+      - name: Install Python build and offline baking dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install \
+            docutils \
+            setuptools \
+            numpy \
+            segno \
+            scipy \
+            colour-science \
+            scikit-image \
+            matplotlib \
+            opt-einsum \
+            numba \
+            OpenImageIO \
+            pyfftw \
+            rawpy \
+            exiv2 \
+            lensfunpy
+
+      - name: Build Stage 01 (Clean ML Base) and Stage 02 (M-Film v0.2.3)
+        run: |
+          chmod +x scripts/build_all.sh scripts/build_03_bundle.sh
+          ./scripts/build_all.sh
+
+      - name: Build Stage 03 (External SpektraFilm Profiles Bundle)
+        run: |
+          ./scripts/build_03_bundle.sh
+
+      - name: Cross-model smoke build (EOSM.202 filmos.mo with FATAL_WARNINGS=y)
+        run: |
+          export ARM_BINPATH="$(dirname "$(command -v arm-none-eabi-gcc)")"
+          ML_SRC="${PWD}/build/magiclantern_simplified" \
+            bash build/mfilm-canon-film-simulation/ml-dev/build_fork.sh EOSM.202 --module
+          ls -lh build/mfilm-canon-film-simulation/ml-dev/out/fork/ML/modules/filmos.mo
+
+      - name: Run 6-gate deterministic safety & license audit
+        run: |
+          python3 scripts/verify_m2_safety.py dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip
+
+      - name: Upload build bundles and audit reports (30 days retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: eos-m2-mfilm-bundles-and-reports
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            docs/SAFETY_AUDIT_REPORT.md
+            docs/SPEKTRAFILM_BAKE_REPORT.md

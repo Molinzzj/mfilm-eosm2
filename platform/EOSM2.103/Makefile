@@ -18,7 +18,6 @@ ML_BOOT_OBJ = boot-d45-am.o
 ML_SRC_EXTRA_OBJS = $(BUILD_DIR)/reloc.o
 
 ML_AF_PATTERNS_OBJ = n
-ML_SRC_EXTRA_OBJS += $(BUILD_DIR)/filmhook.o
 
 include ../Makefile
 .DEFAULT_GOAL := $(BUILD_DIR)/cam_complete
