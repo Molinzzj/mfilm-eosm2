@@ -1,6 +1,6 @@
 # SAFETY_AUDIT_REPORT.md — Canon EOS M2 (1.0.3) 六项确定性安全与协议合规审计报告
 
-> **最终结论**：**`PASS`**（6 项强制安全与协议合规门禁 + `01` / `02` / `03` 全部三个成品 ZIP 包 `ML/MODULES/EOSM2103.SYM` 非空与结构核验全部通过，允许交付 `dist/` 全部三阶段测试包）
+> **最终结论**：**`PASS`**（6 项强制安全与协议合规门禁 + `01` / `02` / `03` 全部三个 `v1.0.0` 正式发布包 `ML/MODULES/EOSM2103.SYM` 非空与结构核验全部通过，且三阶段均已在 Canon EOS M2 官方固件 `1.0.3` 真机实测 **Hardware Verified (PASS)**）
 
 ---
 
@@ -40,15 +40,15 @@ python3 scripts/verify_m2_safety.py \
   Scanned files (firmware tree + patches + mfilm changes): 90 | Violations: 0
 [ARTIFACT] dist/01_EOSM2_Clean_ML_Base.zip
   Size: 1658202 bytes
-  SHA256: c21ec7c285e5965e78ca4d05a9dc71990739a46ab5f51410c11a2092681ae4a5
+  SHA256: fc694b0170642606ad1dfe291e4a7f695b9e2b9286782a7766cc982f59a6a91d
   Entries: 52 | EOSM2103.SYM=36578 B | required_missing=0 | legacy_sym=0 | DARKROOM=False | SAMPLES=False | ext_cfgs=0 | attribution=False | junk=0
 [ARTIFACT] dist/02_EOSM2_MFilm_023_TestBuild.zip
-  Size: 18469723 bytes
-  SHA256: 2bd9287a0801bfbf9eadd9862f6938b90af462b570cc2ae5ca51c6944b956f7a
+  Size: 18469721 bytes
+  SHA256: 8a71290de209388694b9e96f216b623d60aeff82a346c92e59c4898cf7da0b22
   Entries: 196 | EOSM2103.SYM=36710 B | required_missing=0 | legacy_sym=0 | DARKROOM=True | SAMPLES=True | ext_cfgs=0 | attribution=False | junk=0
 [ARTIFACT] dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip
-  Size: 18488231 bytes
-  SHA256: 4d519037c724bb160749baba11f6361b56a181bcb3a23233ce845cca8ba7edb2
+  Size: 18488229 bytes
+  SHA256: 72d0c895f2ce05dfb4ca4646021551d095929377b1f6fbeafb2fb50e16fee9a4
   Entries: 219 | EOSM2103.SYM=36710 B | required_missing=0 | legacy_sym=0 | DARKROOM=True | SAMPLES=True | ext_cfgs=20 | attribution=True | junk=0
 === OVERALL SAFETY AUDIT: PASS ===
 ```
@@ -78,13 +78,14 @@ python3 scripts/verify_m2_safety.py \
 
 ---
 
-## 五、 核心文件 SHA256 校验值（本次本地复现构建）
+## 五、 核心文件 SHA256 校验值（`v1.0.0` 正式发布构建）
 
-- `dist/01_EOSM2_Clean_ML_Base.zip` (`1,658,202` bytes): `c21ec7c285e5965e78ca4d05a9dc71990739a46ab5f51410c11a2092681ae4a5`
-- `dist/02_EOSM2_MFilm_023_TestBuild.zip` (`18,469,723` bytes): `2bd9287a0801bfbf9eadd9862f6938b90af462b570cc2ae5ca51c6944b956f7a`
-- `dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip` (`18,488,231` bytes): `4d519037c724bb160749baba11f6361b56a181bcb3a23233ce845cca8ba7edb2`
-- `autoexec.bin` (Stage 01, `453,088` bytes): `ced994d7344def002f92970eeb3c2ca94d223fb14f99a032b3cdda59c41aaa02`
-- `autoexec.bin` (Stage 02/03, `453,984` bytes): `0f40e9a3bdf25e55e74fd882708c6b00a4de9172180bd00dbbe2948ea6c09948`
+- `dist/01_EOSM2_Clean_ML_Base.zip` (`1,658,202` bytes): `fc694b0170642606ad1dfe291e4a7f695b9e2b9286782a7766cc982f59a6a91d`
+- `dist/02_EOSM2_MFilm_023_TestBuild.zip` (`18,469,721` bytes): `8a71290de209388694b9e96f216b623d60aeff82a346c92e59c4898cf7da0b22`
+- `dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zip` (`18,488,229` bytes): `72d0c895f2ce05dfb4ca4646021551d095929377b1f6fbeafb2fb50e16fee9a4`
+- `autoexec.bin` (Stage 01, `453,088` bytes): `4e83f899f8ac97cf614d32a1721036f399e059ddc3c0198b080ad039b847f26e`
+- `autoexec.bin` (Stage 02/03, `453,984` bytes): `97aa5631e88ffafe3c63ccbc58058dfa455bf7a938fff713b5563939df33c355`
+- `ML/MODULES/EOSM2103.SYM` (Stage 01, `36,578` bytes): `b5b12b16ff7233feb4daabfafed781b999a614171eebe63c50b5f85c20fb918d`
 - `ML/MODULES/EOSM2103.SYM` (Stage 02/03, `36,710` bytes): `3babc4c5685e81a288bfeb8811cfcb46b623ad3f5b17ea9caa307bb5794ae25c`
-- `ML/MODULES/filmos.mo` (`287,188` bytes): `ca408629cec1b3acdc803abfb0f7f083add2ab70e6364fac77c487dc4026644a`
+- `ML/MODULES/filmos.mo` (`287,188` bytes): `69ca293c8f80ede6111aa8b030302d620d59b32223509c484d4d7f9c69abc714`
 - `ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt` (`1,862` bytes): `fea4d36597823761d5fc514865ba945c71ff7113a69fea561ec111776ccdd2cb`

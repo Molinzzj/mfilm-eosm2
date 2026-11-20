@@ -1,18 +1,24 @@
 # M-Film for Canon EOS M2 (Firmware 1.0.3)
 
 [![Build & Safety Audit](https://github.com/Molinzzj/mfilm-eosm2/actions/workflows/build-and-audit.yml/badge.svg)](https://github.com/Molinzzj/mfilm-eosm2/actions/workflows/build-and-audit.yml)
+![Hardware Verification](https://img.shields.io/badge/EOS%20M2%20(1.0.3)-Hardware%20Verified%20(PASS)-brightgreen)
 
 [中文文档 (README_CN.md)](./README_CN.md)
 
 A **Magic Lantern** port (based on [`reticulatedpines/magiclantern_simplified`](https://github.com/reticulatedpines/magiclantern_simplified)) with **M-Film v0.2.3** ([`HNGSeries/mfilm-canon-film-simulation`](https://github.com/HNGSeries/mfilm-canon-film-simulation)) film simulation and in-camera RAW darkroom integrated for the **Canon EOS M2** (DIGIC 5 / ARM946E-S, Official Firmware **1.0.3**).
+
+> **Hardware Status**: **Hardware Verified (PASS)** on a physical **Canon EOS M2 (Firmware 1.0.3)** across all three stages — Stage 1 (Clean Magic Lantern Base), Stage 2 (M-Film v0.2.3 Core & In-Camera Darkroom), and Stage 3 (20 External SpektraFilm `.cfg` Profiles Loading & Developing).
 
 ---
 
 ## ⚠️ Safety Warning — Read Before Use
 
 > [!CAUTION]
-> - **Firmware 1.0.3 ONLY**: This port is strictly locked to **Canon EOS M2 official firmware `1.0.3`** (`EOSM2.103`). Check your camera's `Firmware Ver. 1.0.3` in Canon's menu before trying anything. Do **not** run this on any other camera model or firmware version.
-> - **Non-Persistent Loading Strongly Recommended**: Always test via Canon's built-in **Menu → Wrench → Firmware Ver. 1.0.3 → Firmware Update** flow. Do **not** enable or write the NVRAM Bootflag during early testing.
+> - **🔴 STRICT FIRMWARE WARNING — OFFICIAL FIRMWARE `1.0.3` ONLY — DO NOT UPGRADE TO `1.0.4`!**
+>   - This port strictly supports **Canon EOS M2 official firmware `1.0.3`** (`EOSM2.103`) **ONLY**.
+>   - Users currently on **`1.0.1`** or **`1.0.2`** may safely upgrade to official **`1.0.3`** using Canon's official 1.0.3 updater.
+>   - **DO NOT upgrade to Canon's latest `1.0.4` security-patch firmware — firmware `1.0.4` CANNOT be downgraded and is NOT supported!**
+> - **Non-Persistent Loading Strongly Recommended**: Always load via Canon's built-in **Menu → Wrench → Firmware Ver. 1.0.3 → Firmware Update** flow. Do **not** enable or write the NVRAM Bootflag unless you understand the risks.
 > - **Zero Automatic Bootflag Writes**: All builds in this repository are statically audited (`scripts/verify_m2_safety.py`) to contain zero automatic `EnableBootDisk` / `SetBootFlag` calls and 100% preserved `EOSM2.103` hardware addresses.
 > - **Use at Your Own Risk**: Third-party camera firmware carries inherent risk. If the camera ever freezes or shows a black screen during non-persistent loading, **remove the battery for 5 seconds and reinsert it** to cleanly return to stock Canon firmware.
 
@@ -20,25 +26,25 @@ A **Magic Lantern** port (based on [`reticulatedpines/magiclantern_simplified`](
 
 ## Key Features
 
-- **Modern Magic Lantern Base (`EOSM2.103`)**: Migrated from the legacy EOS M2 1.0.3 DryOS port onto `magiclantern_simplified` with all 144 active `NSTUB` addresses, VRAM pointers, and `BGMT_*` keycodes preserved intact.
-- **M-Film v0.2.3 External Module (`--module`)**: Runs the Film OS and in-camera CR2→JPEG darkroom as an external module (`ML/modules/filmos.mo`) to stay safely within DIGIC 5's 592 KB (`605,952 B`) fixed boot memory reservation (`537,344 B` used, `67.0 KB` headroom).
+- **Modern Magic Lantern Base (`EOSM2.103`) — Hardware Verified (PASS)**: Migrated from the legacy EOS M2 1.0.3 DryOS port onto `magiclantern_simplified` with all 144 active `NSTUB` addresses, VRAM pointers, and `BGMT_*` keycodes preserved intact. Uses the DryOS FAT32 8.3-compliant symbol table **`ML/MODULES/EOSM2103.SYM`** so module loading works reliably on EOS M2's single-slot FAT32 filesystem.
+- **M-Film v0.2.3 External Module (`--module`) — Hardware Verified (PASS)**: Runs the Film OS and in-camera CR2→JPEG darkroom as an external module (`ML/MODULES/filmos.mo`) to stay safely within DIGIC 5's 592 KB (`605,952 B`) fixed boot memory reservation (`537,344 B` used, `67.0 KB` headroom).
 - **Mirrorless HUD & Canon Graphics Hiding**: Inherits EOS M mirrorless optimizations — direct LiveView HUD rendering (skipping DSLR top-plate code) and **`Settings → Advanced → Hide Canon's graphics`** to prevent Canon's exposure scale/icons from drawing over the M-Film HUD.
-- **Cross-Model External Profile Loader (`fos_extprof`)**: Clean-room GPL-2.0 loader with zero `EOSM2`-specific macros, hardcoded screen coordinates, or camera-specific memory assumptions — uses `fos_port_*` file/memory pool abstractions so it builds cleanly across M-Film models (`EOSM2.103`, `EOSM.202`, `6D.116`, etc.), verified with an `EOSM.202` `filmos.mo` (`FATAL_WARNINGS=y`) smoke build and a host-side zero-leak unit test (`Allocs == Frees`).
+- **Cross-Model External Profile Loader (`fos_extprof`) — Hardware Verified (PASS)**: Clean-room GPL-2.0 loader with zero `EOSM2`-specific macros, hardcoded screen coordinates, or camera-specific memory assumptions — uses `fos_port_*` file/memory pool abstractions so it builds cleanly across M-Film models (`EOSM2.103`, `EOSM.202`, `6D.116`, etc.), verified on physical EOS M2 (1.0.3) with 20 external `(SF)` `.cfg` profiles, an `EOSM.202` `filmos.mo` (`FATAL_WARNINGS=y`) smoke build, and a host-side zero-leak unit test (`Allocs == Frees`).
 - **Three-Stage Release Bundles**:
-  - `01_EOSM2_Clean_ML_Base.zip`: Pure Magic Lantern base for verifying boot, menus, and buttons first.
-  - `02_EOSM2_MFilm_023_TestBuild.zip`: Standard M-Film v0.2.3 bundle with built-in darkroom LUTs and film stocks.
+  - `01_EOSM2_Clean_ML_Base.zip`: Pure Magic Lantern base (`ML/MODULES/EOSM2103.SYM`) for verifying boot, menus, and buttons first.
+  - `02_EOSM2_MFilm_023_TestBuild.zip`: Standard M-Film v0.2.3 bundle (`ML/MODULES/filmos.mo` + `ML/MODULES/EOSM2103.SYM`) with built-in darkroom LUTs and film stocks.
   - `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`: M-Film v0.2.3 with the dynamic external profile loader (`fos_extprof`) and 20 baked SpektraFilm `(SF)` profiles pre-populated under `ML/MFILM/profiles/`.
 
 ---
 
 ## Quick Start (4 Steps)
 
-1. **Verify Firmware & Prepare SD Card**: Confirm your EOS M2 is on official **Firmware 1.0.3**. Format a **≤ 32 GB FAT32** SD card inside the camera and make sure the battery is fully charged.
-2. **Download Release Bundle**: Download `01_EOSM2_Clean_ML_Base.zip` (recommended for first-time sanity check), `02_EOSM2_MFilm_023_TestBuild.zip`, or `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip` (includes the 20 pre-baked `(SF)` external film profiles) from [GitHub Releases](https://github.com/Molinzzj/mfilm-eosm2/releases) or the latest green [GitHub Actions (`Build & Safety Audit`)](https://github.com/Molinzzj/mfilm-eosm2/actions/workflows/build-and-audit.yml) Artifacts (`eos-m2-mfilm-bundles-and-reports`, retained for 30 days), and verify the `.sha256` checksum.
-3. **Extract to SD Card Root**: Unzip the archive directly into the **root directory** of the SD card so `autoexec.bin`, `ML-SETUP.FIR`, and the `ML/` folder sit directly at the top level (do not nest inside an extra folder). When using `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`, this also populates `ML/MFILM/profiles/*.cfg` (20 `(SF)` profiles) and `ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt`, making all external stocks immediately selectable in the M-Film shelf upon boot.
-4. **Load via Firmware Update**: Insert the card, switch the mode dial to a still-photo mode (`M` / `Av` / `Tv`), set image quality to **RAW** (required for M-Film's in-camera darkroom), open Canon's menu → **Firmware Ver. 1.0.3 → Firmware Update**, and run a non-persistent boot. Press **Trash / Delete** (or long-press **Down**) in LiveView to open Magic Lantern / M-Film.
+1. **Verify Firmware (`1.0.3` ONLY) & Prepare SD Card**: Confirm your EOS M2 is on official **Firmware `1.0.3`** (`1.0.1` / `1.0.2` users may update to `1.0.3`; **never upgrade to `1.0.4`**). Format a **≤ 32 GB FAT32** SD card inside the camera and make sure the battery is fully charged.
+2. **Download Release Bundle**: Download `01_EOSM2_Clean_ML_Base.zip`, `02_EOSM2_MFilm_023_TestBuild.zip`, or `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip` (recommended — includes the 20 pre-baked `(SF)` external film profiles) from [GitHub Releases](https://github.com/Molinzzj/mfilm-eosm2/releases) or the latest green [GitHub Actions (`Build & Safety Audit`)](https://github.com/Molinzzj/mfilm-eosm2/actions/workflows/build-and-audit.yml) Artifacts (`eos-m2-mfilm-bundles-and-reports`, retained for 30 days), and verify the `.sha256` checksum.
+3. **Extract to SD Card Root**: Unzip the archive directly into the **root directory** of the SD card so `autoexec.bin`, `ML-SETUP.FIR`, `ML/MODULES/EOSM2103.SYM`, and the `ML/` folder sit directly at the top level (do not nest inside an extra folder). When using `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`, this also populates `ML/MFILM/profiles/*.cfg` (20 `(SF)` profiles) and `ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt`, making all external stocks immediately selectable in the M-Film shelf upon boot.
+4. **Load via Firmware Update**: Insert the card, switch the mode dial to a still-photo mode (`M` / `Av` / `Tv`), set image quality to **RAW** (required for M-Film's in-camera darkroom), open Canon's menu → **Firmware Ver. 1.0.3 → Firmware Update**, and run a non-persistent boot. In LiveView, **long-press the Delete / Trash button** to open Magic Lantern / M-Film.
 
-For a detailed three-stage checklist covering all three test bundles, see [`docs/REAL_CAMERA_SMOKE_TEST.md`](./docs/REAL_CAMERA_SMOKE_TEST.md).
+For the full three-stage real-camera test report (**Hardware Verified (PASS)**), see [`docs/REAL_CAMERA_SMOKE_TEST.md`](./docs/REAL_CAMERA_SMOKE_TEST.md).
 
 ---
 
@@ -126,7 +132,7 @@ This port was engineered using an **AI-assisted, rule-governed workflow (Google 
 
 - **Zero-Hallucination Address Preservation**: No firmware addresses were guessed or generated by AI. Every hardware offset in `platform/EOSM2.103/`—including all **135 `0xFF...` firmware stubs** in `stubs.S`, `ROMBASEADDR = 0xFF0C0000`, `RESTARTSTART = 0x44C100`, VRAM addresses, and `BGMT_*` key event codes—was preserved verbatim from the hardware-verified EOS M2 (1.0.3) port (`ccritix/magic-lantern`) and locked by golden SHA256 digests in [`scripts/verify_m2_safety.py`](./scripts/verify_m2_safety.py).
 - **Automated CI & 6-Gate Audit**: Every push to `main` and pull request triggers [`.github/workflows/build-and-audit.yml`](./.github/workflows/build-and-audit.yml), which builds all three bundles, performs an upstream `EOSM.202` `filmos.mo` cross-model smoke build (`FATAL_WARNINGS=y`), enforces all 6 deterministic safety/compliance gates (startup memory `< 592 KB`, zero automatic NVRAM Bootflag writes, zero GPL-3.0 contamination), and uploads verified bundles and reports as 30-day Artifacts.
-- **Verification Status**: Cross-compilation, cross-model smoke compilation, host memory-pool zero-leak testing, and all 6 static safety/compliance checks have passed (`Pre-release`). Non-persistent loading via Canon's **Firmware Update** menu is strictly recommended while physical smoke testing on an EOS M2 (1.0.3) is completed.
+- **Verification Status — Hardware Verified (PASS)**: Cross-compilation, `EOSM.202` cross-model smoke compilation, host memory-pool zero-leak testing, all 6 static safety/compliance checks, and **all three stages on a physical Canon EOS M2 (Firmware `1.0.3`)** — Stage 1 (Clean ML Base + `ML/MODULES/EOSM2103.SYM`), Stage 2 (M-Film v0.2.3 Core & Darkroom), and Stage 3 (20 External SpektraFilm `.cfg` Profiles Loading & Developing) — have **PASSED**. Non-persistent loading via Canon's **Firmware Update** menu remains strongly recommended.
 
 ---
 

@@ -1,18 +1,24 @@
 # M-Film for Canon EOS M2（官方固件 1.0.3）
 
 [![Build & Safety Audit](https://github.com/Molinzzj/mfilm-eosm2/actions/workflows/build-and-audit.yml/badge.svg)](https://github.com/Molinzzj/mfilm-eosm2/actions/workflows/build-and-audit.yml)
+![Hardware Verification](https://img.shields.io/badge/EOS%20M2%20(1.0.3)-Hardware%20Verified%20(PASS)-brightgreen)
 
 [English Documentation (README.md)](./README.md)
 
 为 **Canon EOS M2**（DIGIC 5 / ARM946E-S，官方固件 **1.0.3**）移植现代 **Magic Lantern**（基于 [`reticulatedpines/magiclantern_simplified`](https://github.com/reticulatedpines/magiclantern_simplified)），并完整集成 **M-Film v0.2.3**（[`HNGSeries/mfilm-canon-film-simulation`](https://github.com/HNGSeries/mfilm-canon-film-simulation)）胶片模拟与机内暗房系统。
+
+> **实机验证状态**：**Hardware Verified (PASS)** — 已在真实 **Canon EOS M2（官方固件 1.0.3）** 机身上完整通过第一阶段（纯净魔灯底座）、第二阶段（M-Film 0.2.3 核心与机内暗房）及第三阶段（20 款外置 SpektraFilm `.cfg` 胶片加载与显影）全部实测。
 
 ---
 
 ## ⚠️ 安全警告 — 使用前请务必阅读
 
 > [!CAUTION]
-> - **仅支持官方固件 1.0.3**：本项目严格锁定 **Canon EOS M2 官方固件 `1.0.3`**（`EOSM2.103`）。使用前请先在相机菜单确认 `固件版本 / Firmware Ver. 1.0.3`，**切勿**在其他机型或固件版本上运行。
-> - **强烈推荐非持久化加载**：请通过相机原厂菜单 **扳手设置 → 固件版本 1.0.3 → 固件升级（Firmware Update）** 进行安全非持久化加载。在早期测试验证完成前，**请勿**写入或开启相机 NVRAM Bootflag（开机自启）。
+> - **🔴 重要固件红线警告 — 仅支持官方固件 `1.0.3`，严禁升级至 `1.0.4`！**
+>   - 本项目严格锁定且仅支持 **Canon EOS M2 官方固件 `1.0.3`**（`EOSM2.103`）。
+>   - 当前为 **`1.0.1`** 或 **`1.0.2`** 的用户，可从佳能官网下载官方 **`1.0.3`** 固件安全升级后再使用。
+>   - **严禁升级至佳能官网最新的 `1.0.4` 安全补丁版固件！`1.0.4` 无法降级且完全不支持 Magic Lantern / M-Film！**
+> - **强烈推荐非持久化加载**：请通过相机原厂菜单 **扳手设置 → 固件版本 1.0.3 → 固件升级（Firmware Update）** 进行安全非持久化加载。除非明确了解风险，否则**请勿**写入或开启相机 NVRAM Bootflag（开机自启）。
 > - **零自动 Bootflag 写入**：本项目全部构建均经过 `scripts/verify_m2_safety.py` 静态与二进制门禁审计，确认无任何自动 `EnableBootDisk` / `SetBootFlag` 调用，且 100% 保留经实机验证的 `EOSM2.103` 硬件地址表。
 > - **自刷风险提示**：运行第三方相机固件存在固有风险，请自担风险。在非持久化加载模式下，若遇到黑屏或卡死，**直接抠出电池静置 5 秒后装回**即可 100% 恢复佳能原厂系统。
 
@@ -20,25 +26,25 @@
 
 ## 核心特性
 
-- **现代魔灯底座（`EOSM2.103`）**：将经典 EOS M2 1.0.3 DryOS 端口迁移至 `magiclantern_simplified`，100% 原样保留全部 144 个有效 `NSTUB` 固件地址、显存基址及 `BGMT_*` 按键码。
-- **M-Film v0.2.3 外挂模块模式（`--module`）**：将 Film OS 与机内 CR2→JPEG 暗房编译为外挂模块 `ML/modules/filmos.mo`，严格控制在 DIGIC 5 固定 592 KB（`605,952 B`）开机内存红线内（实际占用 `537,344 B`，剩余 `67.0 KB` 安全余量）。
+- **现代魔灯底座（`EOSM2.103`）— Hardware Verified (PASS)**：将经典 EOS M2 1.0.3 DryOS 端口迁移至 `magiclantern_simplified`，100% 原样保留全部 144 个有效 `NSTUB` 固件地址、显存基址及 `BGMT_*` 按键码；符号表采用严格符合 DryOS FAT32 8.3 短文件名规范的 **`ML/MODULES/EOSM2103.SYM`**，确保模块加载稳定可靠。
+- **M-Film v0.2.3 外挂模块模式（`--module`）— Hardware Verified (PASS)**：将 Film OS 与机内 CR2→JPEG 暗房编译为外挂模块 `ML/MODULES/filmos.mo`，严格控制在 DIGIC 5 固定 592 KB（`605,952 B`）开机内存红线内（实际占用 `537,344 B`，剩余 `67.0 KB` 安全余量）。
 - **无反低内存 HUD 与原厂图形屏蔽**：完整继承 EOS M 无反优化 — 跳过单反顶屏代码、采用低开机内存取景器 HUD 直接绘制，并支持 **`Settings → Advanced → Hide Canon's graphics`** 一键屏蔽佳能原厂曝光标尺与图标。
-- **全机型通用外置胶片加载器（`fos_extprof`）**：纯 GPL-2.0 净室实现，零 `EOSM2` 专属宏、零硬编码屏幕坐标与特定相机内存假设，全面基于 `fos_port_*` 文件与临时内存池接口，兼容所有 M-Film 支持机型（`EOSM2.103`、`EOSM.202`、`6D.116` 等）；已通过上游 `EOSM.202` 的 `filmos.mo` 冒烟编译（`FATAL_WARNINGS=y` 零错误零警告）及宿主机内存池零泄漏单元测试（`Allocs == Frees`）。
-- **三阶段测试包（Three-Stage Release Bundles）**：
-  - `01_EOSM2_Clean_ML_Base.zip`：纯净魔灯底座，用于先行验证开机、菜单与按键响应。
-  - `02_EOSM2_MFilm_023_TestBuild.zip`：标准 M-Film v0.2.3 测试包（含内置机内暗房 LUT 与胶片预设）。
+- **全机型通用外置胶片加载器（`fos_extprof`）— Hardware Verified (PASS)**：纯 GPL-2.0 净室实现，零 `EOSM2` 专属宏、零硬编码屏幕坐标与特定相机内存假设，全面基于 `fos_port_*` 文件与临时内存池接口，兼容所有 M-Film 支持机型（`EOSM2.103`、`EOSM.202`、`6D.116` 等）；已通过 EOS M2（1.0.3）真机 20 款外置 `(SF)` `.cfg` 实测、上游 `EOSM.202` 的 `filmos.mo` 冒烟编译（`FATAL_WARNINGS=y` 零错误零警告）及宿主机内存池零泄漏单元测试（`Allocs == Frees`）。
+- **三阶段发布包（Three-Stage Release Bundles）**：
+  - `01_EOSM2_Clean_ML_Base.zip`：纯净魔灯底座（含 `ML/MODULES/EOSM2103.SYM`），用于独立验证开机、菜单与按键响应。
+  - `02_EOSM2_MFilm_023_TestBuild.zip`：标准 M-Film v0.2.3 发布包（含 `ML/MODULES/filmos.mo`、`ML/MODULES/EOSM2103.SYM` 及内置机内暗房 LUT 与胶片预设）。
   - `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`：M-Film v0.2.3 集成动态外置配置加载器（`fos_extprof`），并在 `ML/MFILM/profiles/` 目录预置 20 款离线烘焙的 SpektraFilm `(SF)` 胶片配置。
 
 ---
 
 ## 快速上手指南（4 步完成）
 
-1. **确认固件并准备 SD 卡**：确认 EOS M2 为官方固件 **1.0.3**，使用满电电池与 **≤ 32 GB 的 FAT32 格式 SD 卡**（建议先在相机内格式化一次）。
-2. **下载成品压缩包**：前往 [GitHub Releases](https://github.com/Molinzzj/mfilm-eosm2/releases) 或本仓库 [GitHub Actions (`Build & Safety Audit`)](https://github.com/Molinzzj/mfilm-eosm2/actions/workflows/build-and-audit.yml) 最新绿灯记录的 **Artifacts（`eos-m2-mfilm-bundles-and-reports`，保留 30 天）**，下载 `01_EOSM2_Clean_ML_Base.zip`（建议首次先测底座）、`02_EOSM2_MFilm_023_TestBuild.zip` 或 `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`（预置 20 款 `(SF)` 外置胶片配置），并核对 `.sha256` 校验值。
-3. **解压至 SD 卡根目录**：将压缩包**直接解压至 SD 卡根目录**，确保根目录直接出现 `autoexec.bin`、`ML-SETUP.FIR` 与 `ML/` 文件夹（切勿多套一层子目录）。若使用 `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`，解压后还会自动填充 `ML/MFILM/profiles/*.cfg`（20 款 `(SF)` 配置）与 `ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt`，开机进入 M-Film 选卷架即可直接选用。
-4. **通过固件升级安全加载**：插卡开机，将拍摄模式拨盘调至 **M / Av / Tv** 静态照片档，在佳能菜单中将画质设为 **RAW**（机内暗房必需），进入 **固件版本 1.0.3 → 固件升级** 执行非持久化加载。进入实时取景后按 **垃圾桶 / 删除键**（或长按向下键）即可呼出 Magic Lantern / M-Film。
+1. **确认固件（仅限 `1.0.3`）并准备 SD 卡**：确认 EOS M2 为官方固件 **`1.0.3`**（`1.0.1` / `1.0.2` 用户可从佳能官网下载 `1.0.3` 升级；**严禁升级至 `1.0.4`**），使用满电电池与 **≤ 32 GB 的 FAT32 格式 SD 卡**（建议先在相机内格式化一次）。
+2. **下载成品压缩包**：前往 [GitHub Releases](https://github.com/Molinzzj/mfilm-eosm2/releases) 或本仓库 [GitHub Actions (`Build & Safety Audit`)](https://github.com/Molinzzj/mfilm-eosm2/actions/workflows/build-and-audit.yml) 最新绿灯记录的 **Artifacts（`eos-m2-mfilm-bundles-and-reports`，保留 30 天）**，下载 `01_EOSM2_Clean_ML_Base.zip`、`02_EOSM2_MFilm_023_TestBuild.zip` 或 `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`（推荐 — 预置 20 款 `(SF)` 外置胶片配置），并核对 `.sha256` 校验值。
+3. **解压至 SD 卡根目录**：将压缩包**直接解压至 SD 卡根目录**，确保根目录直接出现 `autoexec.bin`、`ML-SETUP.FIR`、`ML/MODULES/EOSM2103.SYM` 与 `ML/` 文件夹（切勿多套一层子目录）。若使用 `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`，解压后还会自动填充 `ML/MFILM/profiles/*.cfg`（20 款 `(SF)` 配置）与 `ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt`，开机进入 M-Film 选卷架即可直接选用。
+4. **通过固件升级安全加载**：插卡开机，将拍摄模式拨盘调至 **M / Av / Tv** 静态照片档，在佳能菜单中将画质设为 **RAW**（机内暗房必需），进入 **固件版本 1.0.3 → 固件升级** 执行非持久化加载。进入实时取景后**长按删除键（Trash）**即可呼出 Magic Lantern / M-Film 菜单。
 
-覆盖全部三个测试包的详细实机检查清单请参阅 [`docs/REAL_CAMERA_SMOKE_TEST.md`](./docs/REAL_CAMERA_SMOKE_TEST.md)。
+覆盖全部三个发布包的完整三阶段实机验证报告（**Hardware Verified (PASS)**）请参阅 [`docs/REAL_CAMERA_SMOKE_TEST.md`](./docs/REAL_CAMERA_SMOKE_TEST.md)。
 
 ---
 
@@ -126,7 +132,7 @@ python3 scripts/verify_m2_safety.py dist/03_EOSM2_MFilm_ExtProfiles_TestBuild.zi
 
 - **硬件地址零编造原则**：所有底层固件偏移均直接继承自经过实机验证的 EOS M2（1.0.3）移植分支（`ccritix/magic-lantern`），严禁 AI 推算或修改任何硬件地址。`platform/EOSM2.103/` 中的全部 **135 条 `0xFF...` 固件函数地址**（`stubs.S`）、`ROMBASEADDR = 0xFF0C0000`、`RESTARTSTART = 0x44C100`、显存基址及 `BGMT_*` 按键事件码均保持 100% 原值，并由 [`scripts/verify_m2_safety.py`](./scripts/verify_m2_safety.py) 内置黄金 SHA256 摘要强校验锁定。
 - **全自动 CI 与 6 项确定性门禁**：每次推送至 `main` 或发起 Pull Request 均自动触发 [`.github/workflows/build-and-audit.yml`](./.github/workflows/build-and-audit.yml)，完整执行三包构建、`EOSM.202` 跨机型 `filmos.mo` 冒烟编译（`FATAL_WARNINGS=y`）及 6 项确定性安全/协议门禁（启动内存 `< 592 KB`、零自动 Bootflag 写入、零 GPL-3.0 污染），任一项失败即阻断 CI，通过后自动归档 30 天可下载 Artifacts。
-- **当前验证状态**：交叉编译、跨机型冒烟编译、宿主机内存池零泄漏测试与全项 6 道静态安全及协议合规审计均已通过（当前处于 `Pre-release` 阶段）。在完成 EOS M2（1.0.3）真机冒烟测试前，请务必仅通过相机菜单的**“固件升级（Firmware Update）”**进行非持久化加载。
+- **当前验证状态 — Hardware Verified (PASS)**：交叉编译、`EOSM.202` 跨机型冒烟编译、宿主机内存池零泄漏测试、全项 6 道静态安全及协议合规审计，以及 **Canon EOS M2（官方固件 `1.0.3`）真机三阶段全链路实测**（第一阶段纯净魔灯底座 + `ML/MODULES/EOSM2103.SYM`、第二阶段 M-Film 0.2.3 核心暗房、第三阶段 20 款外置 SpektraFilm `.cfg` 胶片加载与显影）均已 **PASS**。仍强烈推荐通过相机菜单的**“固件升级（Firmware Update）”**进行非持久化加载。
 
 ---
 
