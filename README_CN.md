@@ -92,6 +92,16 @@ python3 scripts/verify_m2_safety.py dist/02_EOSM2_MFilm_023_TestBuild.zip
 
 ---
 
+## 开发方式与安全审计说明
+
+本项目采用 **AI 辅助（Google Antigravity）+ 确定性静态审计** 的工程化流程完成跨代移植与集成：
+
+- **硬件地址零编造原则**：所有底层固件偏移均直接继承自经过实机验证的 EOS M2（1.0.3）移植分支（`ccritix/magic-lantern`），严禁 AI 推算或修改任何硬件地址。`platform/EOSM2.103/` 中的全部 **135 条 `0xFF...` 固件函数地址**（`stubs.S`）、`ROMBASEADDR = 0xFF0C0000`、`RESTARTSTART = 0x44C100`、显存基址及 `BGMT_*` 按键事件码均保持 100% 原值。
+- **确定性 Python 安全门禁**：每次构建打包前均强制运行 [`scripts/verify_m2_safety.py`](scripts/verify_m2_safety.py)，机械核验地址表一致性、DIGIC 5 启动内存余量（严格低于 `592 KB` 上限），并全局扫描确保**零自动改写相机 NVRAM Bootflag 的调用**。
+- **当前验证状态**：交叉编译与全项静态安全审计均已通过（当前处于 `Pre-release` 阶段）。在完成 EOS M2（1.0.3）真机冒烟测试前，请务必仅通过相机菜单的**“固件升级（Firmware Update）”**进行非持久化加载。
+
+---
+
 ## 上游致谢（Credits）
 
 本项目的实现离不开 Magic Lantern 与 M-Film 开源社区的长期贡献：
