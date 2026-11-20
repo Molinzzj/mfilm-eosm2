@@ -63,6 +63,10 @@ if [ ! -f "${PROFILES_DIR}/PROFILES_ATTRIBUTION.txt" ]; then
     echo "ERROR: Missing PROFILES_ATTRIBUTION.txt in ${PROFILES_DIR}." >&2
     exit 1
 fi
+if [ ! -s "${STAGE_DIR}/ML/MODULES/EOSM2103.SYM" ]; then
+    echo "ERROR: Missing or empty ML/MODULES/EOSM2103.SYM in Stage 03 bundle." >&2
+    exit 1
+fi
 
 echo "==> [4/4] Packaging ${OUT_03_ZIP} and generating SHA256..."
 rm -f "${OUT_03_ZIP}" "${OUT_03_ZIP}.sha256"

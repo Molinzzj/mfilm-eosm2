@@ -63,6 +63,15 @@ BASE_ZIP="${DIST_DIR}/01_EOSM2_Clean_ML_Base.zip"
 rm -f "${BASE_ZIP}"
 (
     cd "${ML_DIR}/platform/EOSM2.103/build/zip"
+    if [ -d "ML/modules" ]; then
+        mkdir -p "ML/MODULES"
+        mv ML/modules/* ML/MODULES/ 2>/dev/null || true
+        rmdir "ML/modules"
+    fi
+    if [ ! -s "ML/MODULES/EOSM2103.SYM" ]; then
+        echo "ERROR: Missing or empty ML/MODULES/EOSM2103.SYM in Stage 01 zip dir." >&2
+        exit 1
+    fi
     cp -f "${ML_DIR}/platform/EOSM2.103/ML-SETUP.FIR" ./ML-SETUP.FIR
     zip -r -9 "${BASE_ZIP}" . >/dev/null
 )
@@ -81,6 +90,15 @@ MFILM_ZIP="${DIST_DIR}/02_EOSM2_MFilm_023_TestBuild.zip"
 rm -f "${MFILM_ZIP}"
 (
     cd "${MFILM_OUT}"
+    if [ -d "ML/modules" ]; then
+        mkdir -p "ML/MODULES"
+        mv ML/modules/* ML/MODULES/ 2>/dev/null || true
+        rmdir "ML/modules"
+    fi
+    if [ ! -s "ML/MODULES/EOSM2103.SYM" ]; then
+        echo "ERROR: Missing or empty ML/MODULES/EOSM2103.SYM in Stage 02 output." >&2
+        exit 1
+    fi
     cp -f "${ML_DIR}/platform/EOSM2.103/ML-SETUP.FIR" ./ML-SETUP.FIR
     zip -r -9 "${MFILM_ZIP}" . >/dev/null
 )

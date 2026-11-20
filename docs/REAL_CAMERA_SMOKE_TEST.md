@@ -13,15 +13,15 @@
 **目的**：先独立确认 `EOSM2.103` 的硬件地址、显存映射、按键事件码与 592 KB 开机内存预留完全健康，排除底座问题。
 
 1. **校验与解压**：
-   - 使用随包 `.sha256` 文件核对 `01_EOSM2_Clean_ML_Base.zip` 完整性（本次本地验证 SHA256：`9f32c5ad70b62f9b7f00333b76c174c520ff552ba85cc21c7bf2f001538633f2`；若使用 CI Artifacts 请以对应运行产出的 `.sha256` 为准）。
-   - 将压缩包**直接解压至 FAT32 SD 卡根目录**（确保根目录直接出现 `autoexec.bin`、`ML-SETUP.FIR` 与 `ML/` 文件夹，不要多套一层子目录）。
+   - 使用随包 `.sha256` 文件核对 `01_EOSM2_Clean_ML_Base.zip` 完整性（本次本地验证 SHA256：`c21ec7c285e5965e78ca4d05a9dc71990739a46ab5f51410c11a2092681ae4a5`；若使用 CI Artifacts 请以对应运行产出的 `.sha256` 为准）。
+   - 将压缩包**直接解压至 FAT32 SD 卡根目录**（确保根目录直接出现 `autoexec.bin`、`ML-SETUP.FIR` 与 `ML/MODULES/EOSM2103.SYM`，不要多套一层子目录）。
 2. **固件升级非持久化加载**：
    - 插卡开机，将拍摄模式拨盘调至 **M / Av / Tv 静态照片模式**（不要在录像档）。
    - 进入佳能原厂菜单 → 扳手设置页 → **固件版本（Firmware Ver. 1.0.3）** → 确认执行 **固件升级（Firmware Update）**。
    - 若加载 `ML-SETUP.FIR` 时提示引导选项，请按非持久化测试方式仅引导 `autoexec.bin`（**切勿**在未确认安全前启用开机自动启动 / Bootflag）。
 3. **通过标准（Pass Criteria）**：
-   - [ ] 读卡灯不出现 **3 长 3 短循环闪烁**，屏幕正常亮屏进入实时取景（LiveView）。
-   - [ ] 按机身 **垃圾桶 / 删除键（Delete / Trash）**（或长按向下键 / 双指触摸）呼出 Magic Lantern 菜单，菜单文字清晰、无花屏错位。
+   - [ ] 读卡灯不出现 **3 长 3 短循环闪烁**，屏幕正常亮屏进入实时取景（LiveView），且控制台不再出现 `.sym` 缺失报错。
+   - [ ] 在实时取景下**长按删除键（Trash / 向下键）**呼出 Magic Lantern 菜单，菜单文字清晰、无花屏错位，顶部标签页正常包含 **`Modules`** 标签页。
    - [ ] 上/下/左/右/SET/MENU/PLAY 按键响应准确，无错键或卡死。
    - [ ] 进入 `Debug -> Free Memory` 确认剩余内存正常，随后正常关机。
 
@@ -29,18 +29,18 @@
 
 ## 第二阶段：验证 M-Film 0.2.3 胶片系统（`02_EOSM2_MFilm_023_TestBuild.zip`）
 
-**目的**：在底座验证通过后，验证外挂模块 `ML/modules/filmos.mo` 的加载、选卷、盲拍防回放、隐藏原厂图形与单张机内暗房 CR2→JPEG 显影全链路。
+**目的**：在底座验证通过后，验证外挂模块 `ML/MODULES/filmos.mo` 依托 `ML/MODULES/EOSM2103.SYM` 的自动加载、选卷、盲拍防回放、隐藏原厂图形与单张机内暗房 CR2→JPEG 显影全链路。
 
 1. **清空 SD 卡并解压 M-Film 测试包**：
-   - 使用随包 `.sha256` 文件核对 `02_EOSM2_MFilm_023_TestBuild.zip`（本次本地验证 SHA256：`fa5646dd91a918b77e1cadaf9ea53f2bed37141723234e3d96053807a38f3ef8`）。
+   - 使用随包 `.sha256` 文件核对 `02_EOSM2_MFilm_023_TestBuild.zip`（本次本地验证 SHA256：`2bd9287a0801bfbf9eadd9862f6938b90af462b570cc2ae5ca51c6944b956f7a`）。
    - 删除卡上旧的 `autoexec.bin` 与 `ML/` 目录，将 `02_EOSM2_MFilm_023_TestBuild.zip` 直接解压至 SD 卡根目录。
-   - 确认根目录存在 `autoexec.bin`、`ML-SETUP.FIR`、`ML/modules/filmos.mo`、`ML/modules/EOSM2_103.sym`、`ML/SETTINGS/filmos.en`、`ML/data/FOSFONT.BIN`、`ML/data/FOSFILMS.BIN`、`ML/DARKROOM/` 与 `ML/SAMPLES/`。
+   - 确认根目录存在 `autoexec.bin`、`ML-SETUP.FIR`、`ML/MODULES/filmos.mo`、`ML/MODULES/EOSM2103.SYM`、`ML/SETTINGS/filmos.en`、`ML/data/FOSFONT.BIN`、`ML/data/FOSFILMS.BIN`、`ML/DARKROOM/` 与 `ML/SAMPLES/`。
 2. **将相机画质设为 RAW**：
    - 开机后先在佳能原厂菜单中将图像画质设为 **RAW**（机内暗房依赖 `.CR2` 文件显影）。
    - 同第一阶段方式通过 **固件升级（Firmware Update）** 加载 M-Film。
 3. **四项核心功能逐项冒烟**：
    - **① 选卷装片（Film Shelf）**：
-     - [ ] 进入实时取景后按 Magic Lantern 菜单键，确认自动进入 **M-Film 胶片主界面**（而非原版 ML 菜单；若进入原版 ML 菜单，请到 `Modules` 标签查看 `filmos.mo` 加载日志）。
+     - [ ] 进入实时取景后**长按删除键（Trash）**呼出菜单，确认自动进入 **M-Film 胶片主界面**（而非原版 ML 菜单；若进入原版 ML 菜单，请到 `Modules` 标签查看 `filmos.mo` 加载日志）。
      - [ ] 浏览胶片架（可按 PLAY 预览样片），任选一卷内置胶片（如 Kodak Portra 400 / Gold 200）并装卷（Load Roll）。
    - **② 盲拍与防回放（Blind Shooting）**：
      - [ ] 回到取景器界面，确认 M-Film 取景器 HUD（剩余张数、测光、胶片型号）正常直接绘制在屏幕上。
@@ -60,7 +60,7 @@
 **目的**：在第二阶段确认 M-Film 主体稳定后，验证纯 GPL-2.0 外置配置加载器（`fos_extprof`）从 SD 卡动态扫描、加载 20 款离线烘焙的 SpektraFilm `(SF)` 参数化胶片，以及机内即时合成 `33×33×33` Cineon 3D LUT 显影的稳定性与内存安全性。
 
 1. **校验、解压并核对 SD 卡目录结构**：
-   - 使用随包 `.sha256` 文件核对 `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`（本次本地验证 SHA256：`8ae94d461a71c43ff48812fa9caece0b70b4ff53a919ba7b31e01575a9d577b5`）。
+   - 使用随包 `.sha256` 文件核对 `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip`（本次本地验证 SHA256：`4d519037c724bb160749baba11f6361b56a181bcb3a23233ce845cca8ba7edb2`）。
    - 清空 SD 卡上旧的 `autoexec.bin` 与 `ML/` 目录，将 `03_EOSM2_MFilm_ExtProfiles_TestBuild.zip` 直接解压至 SD 卡根目录。
    - **关键目录核查**：打开 SD 卡中的 `ML/MFILM/profiles/` 目录，确认以下文件完整存在：
      - [ ] 共 **20 个 `.cfg` 胶片配置文件**（如 `kodak_portra_400.cfg`、`kodak_ektar_100.cfg`、`kodak_vision3_500t.cfg`、`fujifilm_pro_400h.cfg`、`fujifilm_velvia_100.cfg`、`kodak_kodachrome_64.cfg` 等）。

@@ -141,6 +141,7 @@ def check_2_makefile():
         "MAIN_FIRMWARE_ADDR": "0xFF0C0000",
         "ROMBASEADDR": "0xFF0C0000",
         "RESTARTSTART": "0x44C100",
+        "ML_MODULES_SYM_NAME": "EOSM2103.SYM",
     }
     errors = []
     new_mk = {}
@@ -245,18 +246,32 @@ def check_3_consts():
 
 
 def check_4_mfilm_symbols_and_boot_mem():
-    """Verify filmos.mo symbol resolution against EOSM2_103.sym and _bss_end - RESTARTSTART < 605952."""
+    """Verify filmos.mo symbol resolution against EOSM2103.SYM and _bss_end - RESTARTSTART < 605952."""
     errors = []
     elf_path = os.path.join(NEW_PLAT, "build/magiclantern")
-    sym_path = os.path.join(MFILM_OUT, "ML/modules/EOSM2_103.sym")
-    mo_path = os.path.join(MFILM_OUT, "ML/modules/filmos.mo")
+    autoexec_path = os.path.join(MFILM_OUT, "autoexec.bin")
+    sym_path = os.path.join(MFILM_OUT, "ML/MODULES/EOSM2103.SYM")
+    mo_path = os.path.join(MFILM_OUT, "ML/MODULES/filmos.mo")
 
     nm_bin = find_arm_tool("arm-none-eabi-nm")
     readelf_bin = find_arm_tool("arm-none-eabi-readelf")
 
-    for label, p in [("magiclantern ELF", elf_path), ("EOSM2_103.sym", sym_path), ("filmos.mo", mo_path)]:
-        if not os.path.isfile(p):
-            errors.append(f"Missing required build artifact: {label} ({p})")
+    for label, p in [
+        ("magiclantern ELF", elf_path),
+        ("autoexec.bin", autoexec_path),
+        ("EOSM2103.SYM", sym_path),
+        ("filmos.mo", mo_path),
+    ]:
+        if not os.path.isfile(p) or os.path.getsize(p) == 0:
+            errors.append(f"Missing or empty required build artifact: {label} ({p})")
+
+    if not errors:
+        with open(autoexec_path, "rb") as f:
+            autoexec_bytes = f.read()
+        if b"ML/MODULES/EOSM2103.SYM" not in autoexec_bytes:
+            errors.append("autoexec.bin does not contain expected 8.3 symbol path 'ML/MODULES/EOSM2103.SYM'")
+        if b"EOSM2_103.sym" in autoexec_bytes:
+            errors.append("autoexec.bin still contains legacy non-8.3 symbol name 'EOSM2_103.sym'")
 
     used_bytes = None
     restart_addr = None
@@ -471,41 +486,73 @@ def verify_zip_and_sha256(zip_path):
         return False
     digest = sha256_file(zip_path)
     size = os.path.getsize(zip_path)
+    base = os.path.basename(zip_path)
+    is_clean_base = "Clean_ML_Base" in base
+    is_ext_profiles = "ExtProfiles" in base
+
     with zipfile.ZipFile(zip_path, "r") as zf:
-        names = zf.namelist()
-    required = [
-        "autoexec.bin",
-        "ML/modules/filmos.mo",
-        "ML/modules/EOSM2_103.sym",
-        "ML/SETTINGS/filmos.en",
-        "ML/data/FOSFONT.BIN",
-        "ML/data/FOSFILMS.BIN",
-    ]
-    missing_req = [r for r in required if r not in names]
+        infos = {zi.filename: zi for zi in zf.infolist()}
+        names = list(infos.keys())
+
+    sym_entry = "ML/MODULES/EOSM2103.SYM"
+    sym_size = infos[sym_entry].file_size if sym_entry in infos else 0
+    legacy_syms = [n for n in names if "eosm2_103" in n.lower()]
+
+    if is_clean_base:
+        required = [
+            "autoexec.bin",
+            "ML-SETUP.FIR",
+            sym_entry,
+        ]
+    else:
+        required = [
+            "autoexec.bin",
+            "ML-SETUP.FIR",
+            "ML/MODULES/filmos.mo",
+            sym_entry,
+            "ML/SETTINGS/filmos.en",
+            "ML/data/FOSFONT.BIN",
+            "ML/data/FOSFILMS.BIN",
+        ]
+
+    missing_req = [r for r in required if r not in infos or infos[r].file_size == 0 and r != "ML/SETTINGS/filmos.en"]
     has_darkroom = any(n.startswith("ML/DARKROOM/") for n in names)
     has_samples = any(n.startswith("ML/SAMPLES/") for n in names)
     ext_cfgs = [n for n in names if n.startswith("ML/MFILM/profiles/") and n.endswith(".cfg")]
-    has_attr = "ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt" in names
+    has_attr = "ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt" in infos and infos["ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt"].file_size > 0
     junk = [n for n in names if n.endswith((".o", ".d", ".log")) or "/.git/" in n]
-    ok = not missing_req and has_darkroom and has_samples and not junk
-    if "ExtProfiles" in os.path.basename(zip_path):
+
+    ok = not missing_req and sym_size > 0 and not legacy_syms and not junk
+    if not is_clean_base:
+        ok = ok and has_darkroom and has_samples
+    if is_ext_profiles:
         ok = ok and len(ext_cfgs) == 20 and has_attr
+
     print(f"[ARTIFACT] {os.path.relpath(os.path.abspath(zip_path), REPO_ROOT)}")
     print(f"  Size: {size} bytes")
     print(f"  SHA256: {digest}")
     print(
-        f"  Entries: {len(names)} | required_missing={len(missing_req)} | "
-        f"DARKROOM={has_darkroom} | SAMPLES={has_samples} | "
+        f"  Entries: {len(names)} | EOSM2103.SYM={sym_size} B | required_missing={len(missing_req)} | "
+        f"legacy_sym={len(legacy_syms)} | DARKROOM={has_darkroom} | SAMPLES={has_samples} | "
         f"ext_cfgs={len(ext_cfgs)} | attribution={has_attr} | junk={len(junk)}"
     )
     if not ok:
-        print(f"  ERROR: ZIP structure check failed (missing={missing_req}, junk={junk[:10]})")
+        print(
+            f"  ERROR: ZIP structure check failed "
+            f"(missing_or_empty={missing_req}, sym_size={sym_size}, legacy_syms={legacy_syms}, junk={junk[:10]})"
+        )
         return False
     return True
 
 
 def main():
-    zip_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    zip_args = sys.argv[1:]
+    if not zip_args:
+        zip_args = [
+            os.path.join(REPO_ROOT, "dist", "01_EOSM2_Clean_ML_Base.zip"),
+            os.path.join(REPO_ROOT, "dist", "02_EOSM2_MFilm_023_TestBuild.zip"),
+            os.path.join(REPO_ROOT, "dist", "03_EOSM2_MFilm_ExtProfiles_TestBuild.zip"),
+        ]
     results = [
         check_1_stubs(),
         check_2_makefile(),
@@ -514,8 +561,8 @@ def main():
         check_5_bootflag_scan(),
         check_6_license_firewall(),
     ]
-    if zip_arg:
-        results.append(verify_zip_and_sha256(zip_arg))
+    for zp in zip_args:
+        results.append(verify_zip_and_sha256(zp))
     overall = "PASS" if all(results) else "BLOCKED"
     print(f"=== OVERALL SAFETY AUDIT: {overall} ===")
     sys.exit(0 if all(results) else 1)

@@ -19,5 +19,8 @@ ML_SRC_EXTRA_OBJS = $(BUILD_DIR)/reloc.o
 
 ML_AF_PATTERNS_OBJ = n
 
+# Strict FAT32 8.3 short filename (DryOS FIO rejects 9-char "EOSM2_103")
+ML_MODULES_SYM_NAME = EOSM2103.SYM
+
 include ../Makefile
 .DEFAULT_GOAL := $(BUILD_DIR)/cam_complete
