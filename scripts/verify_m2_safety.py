@@ -1,25 +1,21 @@
 #!/usr/bin/env python3
-"""Deterministic safety audit verifier for Canon EOS M2 (1.0.3) Magic Lantern + M-Film port.
+"""Deterministic safety audit verifier for Canon EOS M2 (1.0.3) Magic Lantern + M-Film 0.2.3 port."""
 
-Performs 5 mandatory static/binary safety gates before any real-camera SD card test:
-  1. stubs.S hex address consistency (against reference stubs.S if provided)
-  2. Makefile base addresses & Firmware 1.0.3 identity lock
-  3. consts.h / gui.h VRAM, HIJACK, and BGMT_* keycode integrity
-  4. M-Film filmos.mo symbol resolution, zero unwind tables, and boot memory budget (< 605952 B)
-  5. Global automatic NVRAM Bootflag call scan (must be 0 matches)
-  + Optional SD card ZIP structure & SHA256 verification
-"""
-
-import argparse
 import hashlib
 import os
 import re
-import shutil
 import subprocess
 import sys
 import zipfile
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ROOT = "/home/antigravity"
+OLD_PLAT = os.path.join(ROOT, "workspace/01_old_bilal/platform/EOSM2.103")
+NEW_PLAT = os.path.join(ROOT, "workspace/02_ml_simplified/platform/EOSM2.103")
+ML_REPO = os.path.join(ROOT, "workspace/02_ml_simplified")
+MFILM_REPO = os.path.join(ROOT, "workspace/03_mfilm")
+MFILM_OUT = os.path.join(MFILM_REPO, "ml-dev/out/fork-EOSM2.103")
+ARM_BIN = "/home/antigravity/.local/bin"
+
 BOOT_MEM_LIMIT = 605952  # 0x4E0000 - 0x44C100 (592 KB fixed AllocateMemory reservation)
 
 ALLOWED_SYMBOL_RENAMES = {
@@ -29,36 +25,6 @@ ALLOWED_SYMBOL_RENAMES = {
 ALLOWED_ADDR_MACRO_RENAMES = {
     "ROMBASEADDR": "MAIN_FIRMWARE_ADDR",
 }
-
-EXPECTED_MAKEFILE = {
-    "MODEL": "EOSM2",
-    "FW_VERSION": "103",
-    "MAIN_FIRMWARE_ADDR": "0xFF0C0000",
-    "ROMBASEADDR": "0xFF0C0000",
-    "RESTARTSTART": "0x44C100",
-}
-
-PROTECTED_CONST_KEYS = [
-    "HIJACK_INSTR_BL_CSTART",
-    "HIJACK_INSTR_BSS_END",
-    "HIJACK_FIXBR_BZERO32",
-    "HIJACK_FIXBR_CREATE_ITASK",
-    "HIJACK_INSTR_MY_ITASK",
-    "HIJACK_TASK_ADDR",
-    "ROM_ITASK_START",
-    "ROM_ITASK_END",
-    "ROM_CREATETASK_MAIN_START",
-    "ROM_CREATETASK_MAIN_END",
-    "ROM_ALLOCMEM_END",
-    "YUV422_LV_BUFFER_1",
-    "YUV422_LV_BUFFER_2",
-    "YUV422_LV_BUFFER_3",
-    "YUV422_LV_BUFFER_DISPLAY_ADDR",
-    "YUV422_HD_BUFFER_1",
-    "YUV422_HD_BUFFER_2",
-    "REG_EDMAC_WRITE_LV_ADDR",
-    "REG_EDMAC_WRITE_HD_ADDR",
-]
 
 
 def parse_stubs(path):
@@ -84,41 +50,36 @@ def parse_stubs(path):
     return ram_offset, entries, hex_ff_lines
 
 
-def check_1_stubs(new_plat, old_plat=None):
-    new_path = os.path.join(new_plat, "stubs.S")
+def check_1_stubs():
+    old_path = os.path.join(OLD_PLAT, "stubs.S")
+    new_path = os.path.join(NEW_PLAT, "stubs.S")
+    old_off, old_entries, old_ff = parse_stubs(old_path)
     new_off, new_entries, new_ff = parse_stubs(new_path)
+
     errors = []
+    if old_off != new_off:
+        errors.append(f"RAM_OFFSET mismatch: old={old_off} vs new={new_off}")
+    if len(old_ff) != len(new_ff):
+        errors.append(f"0xFF... line count mismatch: old={len(old_ff)} vs new={len(new_ff)}")
+    if len(old_entries) != len(new_entries):
+        errors.append(f"Active NSTUB count mismatch: old={len(old_entries)} vs new={len(new_entries)}")
 
-    if new_off != "(0xFFD1F0E4-0x1900)":
-        errors.append(f"Unexpected RAM_OFFSET: {new_off} (expected (0xFFD1F0E4-0x1900))")
-    if len(new_ff) != 135:
-        errors.append(f"Unexpected 0xFF... line count: {len(new_ff)} (expected 135)")
-    if len(new_entries) != 144:
-        errors.append(f"Unexpected active NSTUB count: {len(new_entries)} (expected 144)")
-
-    if old_plat and os.path.isfile(os.path.join(old_plat, "stubs.S")):
-        old_off, old_entries, old_ff = parse_stubs(os.path.join(old_plat, "stubs.S"))
-        if old_off != new_off:
-            errors.append(f"RAM_OFFSET mismatch: old={old_off} vs new={new_off}")
-        if len(old_ff) != len(new_ff):
-            errors.append(f"0xFF... line count mismatch: old={len(old_ff)} vs new={len(new_ff)}")
-        if len(old_entries) != len(new_entries):
-            errors.append(f"Active NSTUB count mismatch: old={len(old_entries)} vs new={len(new_entries)}")
-        for idx, (o, n) in enumerate(zip(old_entries, new_entries)):
-            o_addr, o_sym, o_ln = o
-            n_addr, n_sym, n_ln = n
-            expected_addr = ALLOWED_ADDR_MACRO_RENAMES.get(o_addr, o_addr)
-            expected_sym = ALLOWED_SYMBOL_RENAMES.get(o_sym, o_sym)
-            if n_addr != expected_addr or n_sym != expected_sym:
-                errors.append(
-                    f"Entry #{idx + 1} mismatch: old(L{o_ln}: {o_addr}, {o_sym}) "
-                    f"vs new(L{n_ln}: {n_addr}, {n_sym})"
-                )
+    for idx, (o, n) in enumerate(zip(old_entries, new_entries)):
+        o_addr, o_sym, o_ln = o
+        n_addr, n_sym, n_ln = n
+        expected_addr = ALLOWED_ADDR_MACRO_RENAMES.get(o_addr, o_addr)
+        expected_sym = ALLOWED_SYMBOL_RENAMES.get(o_sym, o_sym)
+        if n_addr != expected_addr or n_sym != expected_sym:
+            errors.append(
+                f"Entry #{idx+1} mismatch: old(L{o_ln}: {o_addr}, {o_sym}) "
+                f"vs new(L{n_ln}: {n_addr}, {n_sym})"
+            )
 
     status = "PASS" if not errors else "FAIL"
-    print(f"[CHECK 1] stubs.S Hex Address Consistency: {status}")
-    print(f"  RAM_OFFSET: {new_off}")
-    print(f"  0xFF... lines: {len(new_ff)} | Active NSTUBs: {len(new_entries)}")
+    print(f"[CHECK 1] stubs.S 100% Hex Address Consistency: {status}")
+    print(f"  RAM_OFFSET: {old_off} == {new_off}")
+    print(f"  0xFF... lines: old={len(old_ff)}, new={len(new_ff)}")
+    print(f"  Active NSTUBs: old={len(old_entries)}, new={len(new_entries)}")
     for e in errors:
         print(f"  ERROR: {e}")
     return status == "PASS"
@@ -135,16 +96,23 @@ def parse_makefile_vars(path):
     return vals
 
 
-def check_2_makefile(new_plat):
-    new_mk = parse_makefile_vars(os.path.join(new_plat, "Makefile"))
+def check_2_makefile():
+    new_mk = parse_makefile_vars(os.path.join(NEW_PLAT, "Makefile"))
+    expected = {
+        "MODEL": "EOSM2",
+        "FW_VERSION": "103",
+        "MAIN_FIRMWARE_ADDR": "0xFF0C0000",
+        "ROMBASEADDR": "0xFF0C0000",
+        "RESTARTSTART": "0x44C100",
+    }
     errors = []
-    for k, exp in EXPECTED_MAKEFILE.items():
+    for k, exp in expected.items():
         got = new_mk.get(k)
         if got != exp:
             errors.append(f"{k}: expected {exp}, got {got}")
     status = "PASS" if not errors else "FAIL"
     print(f"[CHECK 2] Makefile Base Addresses & FW 1.0.3 Identity: {status}")
-    for k, exp in EXPECTED_MAKEFILE.items():
+    for k, exp in expected.items():
         print(f"  {k} = {new_mk.get(k)} (expected {exp})")
     for e in errors:
         print(f"  ERROR: {e}")
@@ -162,41 +130,52 @@ def parse_defines(path):
     return defs
 
 
-def check_3_consts(new_plat, old_plat=None):
-    new_c = parse_defines(os.path.join(new_plat, "consts.h"))
-    new_gui = parse_defines(os.path.join(new_plat, "gui.h"))
-    bgmt_keys = sorted(k for k in new_gui if k.startswith("BGMT_"))
+def check_3_consts():
+    old_c = parse_defines(os.path.join(OLD_PLAT, "consts.h"))
+    new_c = parse_defines(os.path.join(NEW_PLAT, "consts.h"))
+    keys = [
+        "HIJACK_INSTR_BL_CSTART",
+        "HIJACK_INSTR_BSS_END",
+        "HIJACK_FIXBR_BZERO32",
+        "HIJACK_FIXBR_CREATE_ITASK",
+        "HIJACK_INSTR_MY_ITASK",
+        "HIJACK_TASK_ADDR",
+        "ROM_ITASK_START",
+        "ROM_ITASK_END",
+        "ROM_CREATETASK_MAIN_START",
+        "ROM_CREATETASK_MAIN_END",
+        "ROM_ALLOCMEM_END",
+        "YUV422_LV_BUFFER_1",
+        "YUV422_LV_BUFFER_2",
+        "YUV422_LV_BUFFER_3",
+        "YUV422_LV_BUFFER_DISPLAY_ADDR",
+        "YUV422_HD_BUFFER_1",
+        "YUV422_HD_BUFFER_2",
+        "REG_EDMAC_WRITE_LV_ADDR",
+        "REG_EDMAC_WRITE_HD_ADDR",
+    ]
+    old_gui = parse_defines(os.path.join(OLD_PLAT, "gui.h"))
+    new_gui = parse_defines(os.path.join(NEW_PLAT, "gui.h"))
+    bgmt_keys = sorted(k for k in old_gui if k.startswith("BGMT_"))
+
     errors = []
-
-    for k in PROTECTED_CONST_KEYS:
-        if k not in new_c:
-            errors.append(f"consts.h missing protected key: {k}")
-
+    for k in keys:
+        if old_c.get(k) != new_c.get(k):
+            errors.append(f"consts.h {k}: old={old_c.get(k)} vs new={new_c.get(k)}")
+    if old_c.get("MALLOC_STRUCT") != new_c.get("MALLOC_STRUCT_ADDR"):
+        errors.append(
+            f"MALLOC_STRUCT -> MALLOC_STRUCT_ADDR mismatch: "
+            f"old={old_c.get('MALLOC_STRUCT')} vs new={new_c.get('MALLOC_STRUCT_ADDR')}"
+        )
     if "0xDF1BC + 0x7C" not in new_c.get("LV_OVERLAYS_MODE", ""):
         errors.append(f"LV_OVERLAYS_MODE address mismatch: {new_c.get('LV_OVERLAYS_MODE')}")
-    if new_gui.get("BGMT_PLAY") != "0xb":
-        errors.append(f"BGMT_PLAY unexpected value: {new_gui.get('BGMT_PLAY')}")
-    if new_gui.get("BGMT_MENU") != "0x6":
-        errors.append(f"BGMT_MENU unexpected value: {new_gui.get('BGMT_MENU')}")
-
-    if old_plat and os.path.isfile(os.path.join(old_plat, "consts.h")):
-        old_c = parse_defines(os.path.join(old_plat, "consts.h"))
-        old_gui = parse_defines(os.path.join(old_plat, "gui.h"))
-        for k in PROTECTED_CONST_KEYS:
-            if old_c.get(k) != new_c.get(k):
-                errors.append(f"consts.h {k}: old={old_c.get(k)} vs new={new_c.get(k)}")
-        if old_c.get("MALLOC_STRUCT") != new_c.get("MALLOC_STRUCT_ADDR"):
-            errors.append(
-                f"MALLOC_STRUCT -> MALLOC_STRUCT_ADDR mismatch: "
-                f"old={old_c.get('MALLOC_STRUCT')} vs new={new_c.get('MALLOC_STRUCT_ADDR')}"
-            )
-        for k in sorted(k for k in old_gui if k.startswith("BGMT_")):
-            if old_gui.get(k) != new_gui.get(k):
-                errors.append(f"gui.h {k}: old={old_gui.get(k)} vs new={new_gui.get(k)}")
+    for k in bgmt_keys:
+        if old_gui.get(k) != new_gui.get(k):
+            errors.append(f"gui.h {k}: old={old_gui.get(k)} vs new={new_gui.get(k)}")
 
     status = "PASS" if not errors else "FAIL"
     print(f"[CHECK 3] consts.h / gui.h VRAM & BGMT_* Constants Integrity: {status}")
-    print(f"  Verified {len(PROTECTED_CONST_KEYS)} VRAM/HIJACK/ROM constants + MALLOC_STRUCT_ADDR + LV_OVERLAYS_MODE")
+    print(f"  Verified {len(keys)} VRAM/HIJACK/ROM constants + MALLOC_STRUCT_ADDR + LV_OVERLAYS_MODE")
     print(
         f"  Verified {len(bgmt_keys)} BGMT_* keycodes "
         f"(incl. BGMT_PLAY={new_gui.get('BGMT_PLAY')}, BGMT_MENU={new_gui.get('BGMT_MENU')})"
@@ -206,22 +185,19 @@ def check_3_consts(new_plat, old_plat=None):
     return status == "PASS"
 
 
-def check_4_mfilm_symbols_and_boot_mem(ml_plat_dir, mfilm_out_dir):
+def check_4_mfilm_symbols_and_boot_mem():
     """Verify filmos.mo symbol resolution against EOSM2_103.sym and _bss_end - RESTARTSTART < 605952."""
-    elf_path = os.path.join(ml_plat_dir, "build/magiclantern")
-    sym_path = os.path.join(mfilm_out_dir, "ML/modules/EOSM2_103.sym")
-    mo_path = os.path.join(mfilm_out_dir, "ML/modules/filmos.mo")
-
-    nm_bin = shutil.which("arm-none-eabi-nm")
-    readelf_bin = shutil.which("arm-none-eabi-readelf")
-
-    if not (os.path.isfile(elf_path) and os.path.isfile(sym_path) and os.path.isfile(mo_path)):
-        print("[CHECK 4] M-Film Symbol Resolution & Boot Memory Budget: SKIP (build artifacts not present)")
-        return True
-
     errors = []
-    if not nm_bin or not readelf_bin:
-        errors.append("arm-none-eabi-nm and arm-none-eabi-readelf must be in PATH to inspect ELF/module binaries")
+    elf_path = os.path.join(NEW_PLAT, "build/magiclantern")
+    sym_path = os.path.join(MFILM_OUT, "ML/modules/EOSM2_103.sym")
+    mo_path = os.path.join(MFILM_OUT, "ML/modules/filmos.mo")
+
+    nm_bin = os.path.join(ARM_BIN, "arm-none-eabi-nm")
+    readelf_bin = os.path.join(ARM_BIN, "arm-none-eabi-readelf")
+
+    for label, p in [("magiclantern ELF", elf_path), ("EOSM2_103.sym", sym_path), ("filmos.mo", mo_path)]:
+        if not os.path.isfile(p):
+            errors.append(f"Missing required build artifact: {label} ({p})")
 
     used_bytes = None
     restart_addr = None
@@ -232,7 +208,7 @@ def check_4_mfilm_symbols_and_boot_mem(ml_plat_dir, mfilm_out_dir):
     unwind_secs = []
 
     if not errors:
-        mk_vars = parse_makefile_vars(os.path.join(ml_plat_dir, "Makefile"))
+        mk_vars = parse_makefile_vars(os.path.join(NEW_PLAT, "Makefile"))
         restart_addr = int(mk_vars["RESTARTSTART"], 16)
         nm_out = subprocess.check_output([nm_bin, elf_path], text=True, errors="replace")
         for line in nm_out.splitlines():
@@ -284,7 +260,7 @@ def check_4_mfilm_symbols_and_boot_mem(ml_plat_dir, mfilm_out_dir):
         headroom = BOOT_MEM_LIMIT - used_bytes
         print(
             f"  Boot memory: _bss_end(0x{bss_end:X}) - RESTARTSTART(0x{restart_addr:X}) = "
-            f"{used_bytes} bytes / {BOOT_MEM_LIMIT} bytes (headroom: {headroom} bytes / {headroom / 1024:.1f} KB)"
+            f"{used_bytes} bytes / {BOOT_MEM_LIMIT} bytes (headroom: {headroom} bytes / {headroom/1024:.1f} KB)"
         )
     print(
         f"  filmos.mo symbols: {len(und_syms)} UND (all resolved in {len(exported_syms)} exported syms), "
@@ -295,11 +271,30 @@ def check_4_mfilm_symbols_and_boot_mem(ml_plat_dir, mfilm_out_dir):
     return status == "PASS"
 
 
-def check_5_bootflag_scan(new_plat, ml_repo=None, patches_dir=None):
-    """Scan EOSM2 platform files, patches, and optional ML tree for automatic NVRAM Bootflag calls."""
+def check_5_bootflag_scan():
+    """Scan all new/modified EOSM2 and M-Film source files for automatic NVRAM Bootflag calls."""
     forbidden = re.compile(r"\b(EnableBootDisk|DisableBootDisk|SetBootFlag|bootflag_write_bootblock)\s*\(")
     hits = []
     scanned_files = 0
+
+    scan_roots = [
+        NEW_PLAT,
+        os.path.join(ML_REPO, "modules/filmos"),
+    ]
+    explicit_files = [
+        os.path.join(ML_REPO, "src/filmroll.c"),
+        os.path.join(ML_REPO, "src/filmroll.h"),
+        os.path.join(ML_REPO, "src/filmhook.c"),
+        os.path.join(ML_REPO, "src/gui-common.c"),
+        os.path.join(ML_REPO, "src/zebra.c"),
+        os.path.join(ML_REPO, "src/menu.c"),
+        os.path.join(ML_REPO, "src/boot-d45-am.c"),
+    ]
+    # Include all fos*.c / fos*.h copied into src/
+    src_dir = os.path.join(ML_REPO, "src")
+    for fn in sorted(os.listdir(src_dir)):
+        if fn.startswith("fos") and fn.endswith((".c", ".h")):
+            explicit_files.append(os.path.join(src_dir, fn))
 
     def scan_file(p):
         nonlocal scanned_files
@@ -309,38 +304,96 @@ def check_5_bootflag_scan(new_plat, ml_repo=None, patches_dir=None):
         with open(p, "r", encoding="utf-8", errors="replace") as f:
             for ln, line in enumerate(f, 1):
                 if forbidden.search(line):
-                    hits.append(f"{os.path.relpath(p, REPO_ROOT)}:{ln}: {line.strip()}")
+                    hits.append(f"{os.path.relpath(p, ROOT)}:{ln}: {line.strip()}")
 
-    for dirpath, dirnames, filenames in os.walk(new_plat):
-        dirnames[:] = [d for d in dirnames if d != "build"]
-        for fn in sorted(filenames):
-            if fn.endswith((".c", ".h", ".S", ".s")) and fn != "stubs.S":
-                scan_file(os.path.join(dirpath, fn))
+    for p in explicit_files:
+        scan_file(p)
 
-    if patches_dir and os.path.isdir(patches_dir):
-        for fn in sorted(os.listdir(patches_dir)):
-            if fn.endswith(".patch"):
-                scan_file(os.path.join(patches_dir, fn))
+    for root_dir in scan_roots:
+        if not os.path.isdir(root_dir):
+            continue
+        for dirpath, dirnames, filenames in os.walk(root_dir):
+            dirnames[:] = [d for d in dirnames if d != "build"]
+            for fn in sorted(filenames):
+                if fn.endswith((".c", ".h", ".S", ".s")) and fn != "stubs.S":
+                    scan_file(os.path.join(dirpath, fn))
 
-    if ml_repo and os.path.isdir(ml_repo):
-        src_dir = os.path.join(ml_repo, "src")
-        for fn in ["filmroll.c", "filmroll.h", "filmhook.c", "gui-common.c", "zebra.c", "menu.c", "boot-d45-am.c"]:
-            scan_file(os.path.join(src_dir, fn))
-        if os.path.isdir(src_dir):
-            for fn in sorted(os.listdir(src_dir)):
-                if fn.startswith("fos") and fn.endswith((".c", ".h")):
-                    scan_file(os.path.join(src_dir, fn))
-        mod_dir = os.path.join(ml_repo, "modules/filmos")
-        if os.path.isdir(mod_dir):
-            for dirpath, dirnames, filenames in os.walk(mod_dir):
-                dirnames[:] = [d for d in dirnames if d != "build"]
-                for fn in sorted(filenames):
-                    if fn.endswith((".c", ".h")):
-                        scan_file(os.path.join(dirpath, fn))
+    # Also scan git diff of 03_mfilm if it is a git repo
+    if os.path.isdir(os.path.join(MFILM_REPO, ".git")):
+        diff_out = subprocess.check_output(
+            ["git", "-C", MFILM_REPO, "--no-pager", "diff", "--unified=0"],
+            text=True,
+            errors="replace",
+        )
+        cur_file = ""
+        for line in diff_out.splitlines():
+            if line.startswith("+++ b/"):
+                cur_file = line[6:]
+            elif line.startswith("+") and not line.startswith("+++"):
+                if forbidden.search(line):
+                    hits.append(f"03_mfilm/{cur_file}: {line.strip()}")
 
     status = "PASS" if not hits else "FAIL"
     print(f"[CHECK 5] Global Auto-Bootflag Call Scan: {status}")
-    print(f"  Scanned files: {scanned_files} | Forbidden call matches: {len(hits)}")
+    print(f"  Scanned files: {scanned_files} (+ 03_mfilm git diff) | Forbidden call matches: {len(hits)}")
+    for h in hits:
+        print(f"  ERROR: {h}")
+    return status == "PASS"
+
+
+def check_6_license_firewall():
+    """Scan 02_ml_simplified and 03_mfilm changes for any GPL-3.0 header or spektrafilm reference."""
+    forbidden = re.compile(
+        r"(GPL[-_\s]?v?3(?:\.0)?|General Public License[^\n]*version 3|spektrafilm|andreavolpato|SPEKTRAFILM_LICENSE)",
+        re.IGNORECASE,
+    )
+    hits = []
+    scanned_files = 0
+    seen_paths = set()
+
+    def scan_file(p):
+        nonlocal scanned_files
+        ap = os.path.abspath(p)
+        if ap in seen_paths or not os.path.isfile(ap):
+            return
+        seen_paths.add(ap)
+        scanned_files += 1
+        with open(ap, "r", encoding="utf-8", errors="replace") as f:
+            for ln, line in enumerate(f, 1):
+                if forbidden.search(line):
+                    hits.append(f"{os.path.relpath(ap, ROOT)}:{ln}: {line.strip()}")
+
+    # 1. Scan EOSM2 platform, filmos module, and M-Film source files inside 02_ml_simplified
+    for root_dir in [NEW_PLAT, os.path.join(ML_REPO, "modules/filmos")]:
+        if os.path.isdir(root_dir):
+            for dirpath, dirnames, filenames in os.walk(root_dir):
+                dirnames[:] = [d for d in dirnames if d != "build"]
+                for fn in sorted(filenames):
+                    if fn.endswith((".c", ".h", ".S", ".s", ".py", ".sh", ".rst", "Makefile")):
+                        scan_file(os.path.join(dirpath, fn))
+
+    src_dir = os.path.join(ML_REPO, "src")
+    if os.path.isdir(src_dir):
+        for fn in sorted(os.listdir(src_dir)):
+            if fn.startswith(("fos", "filmroll", "filmhook")) and fn.endswith((".c", ".h")):
+                scan_file(os.path.join(src_dir, fn))
+
+    # 2. Scan all modified & untracked files in 03_mfilm
+    if os.path.isdir(os.path.join(MFILM_REPO, ".git")):
+        st_out = subprocess.check_output(
+            ["git", "-C", MFILM_REPO, "--no-pager", "status", "--porcelain"],
+            text=True,
+            errors="replace",
+        )
+        for line in st_out.splitlines():
+            if len(line) < 4:
+                continue
+            rel = line[3:].strip().split(" -> ")[-1]
+            scan_file(os.path.join(MFILM_REPO, rel))
+
+    status = "PASS" if not hits else "FAIL"
+    print(f"[CHECK 6] GPL-2.0 / GPL-3.0 License Firewall & SpektraFilm Isolation Scan: {status}")
+    print(f"  Scanned files (02_ml_simplified + 03_mfilm changes): {scanned_files} | Violations: {len(hits)}")
     for h in hits:
         print(f"  ERROR: {h}")
     return status == "PASS"
@@ -356,7 +409,6 @@ def sha256_file(path):
 
 def verify_zip_and_sha256(zip_path):
     if not zip_path or not os.path.isfile(zip_path):
-        print(f"[ARTIFACT] ERROR: ZIP file not found: {zip_path}")
         return False
     digest = sha256_file(zip_path)
     size = os.path.getsize(zip_path)
@@ -373,14 +425,19 @@ def verify_zip_and_sha256(zip_path):
     missing_req = [r for r in required if r not in names]
     has_darkroom = any(n.startswith("ML/DARKROOM/") for n in names)
     has_samples = any(n.startswith("ML/SAMPLES/") for n in names)
+    ext_cfgs = [n for n in names if n.startswith("ML/MFILM/profiles/") and n.endswith(".cfg")]
+    has_attr = "ML/MFILM/profiles/PROFILES_ATTRIBUTION.txt" in names
     junk = [n for n in names if n.endswith((".o", ".d", ".log")) or "/.git/" in n]
     ok = not missing_req and has_darkroom and has_samples and not junk
-    print(f"[ARTIFACT] {zip_path}")
+    if "ExtProfiles" in os.path.basename(zip_path):
+        ok = ok and len(ext_cfgs) > 0 and has_attr
+    print(f"[ARTIFACT] {os.path.relpath(zip_path, ROOT)}")
     print(f"  Size: {size} bytes")
     print(f"  SHA256: {digest}")
     print(
         f"  Entries: {len(names)} | required_missing={len(missing_req)} | "
-        f"DARKROOM={has_darkroom} | SAMPLES={has_samples} | junk={len(junk)}"
+        f"DARKROOM={has_darkroom} | SAMPLES={has_samples} | "
+        f"ext_cfgs={len(ext_cfgs)} | attribution={has_attr} | junk={len(junk)}"
     )
     if not ok:
         print(f"  ERROR: ZIP structure check failed (missing={missing_req}, junk={junk[:10]})")
@@ -389,29 +446,17 @@ def verify_zip_and_sha256(zip_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Canon EOS M2 (1.0.3) Magic Lantern + M-Film safety auditor")
-    parser.add_argument("zip_file", nargs="?", help="Optional M-Film SD card ZIP archive to verify")
-    parser.add_argument("--platform-dir", default=os.path.join(REPO_ROOT, "platform/EOSM2.103"),
-                        help="Path to ported platform/EOSM2.103 directory")
-    parser.add_argument("--ref-platform-dir", default=None,
-                        help="Optional path to original EOSM2.103 reference directory for diff check")
-    parser.add_argument("--ml-repo", default=os.path.join(REPO_ROOT, "build/magiclantern_simplified"),
-                        help="Optional path to built magiclantern_simplified checkout")
-    parser.add_argument("--mfilm-out", default=os.path.join(REPO_ROOT, "build/mfilm-canon-film-simulation/ml-dev/out/fork-EOSM2.103"),
-                        help="Optional path to M-Film build output directory")
-    args = parser.parse_args()
-
-    ml_plat_dir = os.path.join(args.ml_repo, "platform/EOSM2.103")
+    zip_arg = sys.argv[1] if len(sys.argv) > 1 else None
     results = [
-        check_1_stubs(args.platform_dir, args.ref_platform_dir),
-        check_2_makefile(args.platform_dir),
-        check_3_consts(args.platform_dir, args.ref_platform_dir),
-        check_4_mfilm_symbols_and_boot_mem(ml_plat_dir, args.mfilm_out),
-        check_5_bootflag_scan(args.platform_dir, args.ml_repo, os.path.join(REPO_ROOT, "patches")),
+        check_1_stubs(),
+        check_2_makefile(),
+        check_3_consts(),
+        check_4_mfilm_symbols_and_boot_mem(),
+        check_5_bootflag_scan(),
+        check_6_license_firewall(),
     ]
-    if args.zip_file:
-        results.append(verify_zip_and_sha256(args.zip_file))
-
+    if zip_arg:
+        results.append(verify_zip_and_sha256(zip_arg))
     overall = "PASS" if all(results) else "BLOCKED"
     print(f"=== OVERALL SAFETY AUDIT: {overall} ===")
     sys.exit(0 if all(results) else 1)

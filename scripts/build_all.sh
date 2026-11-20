@@ -66,8 +66,9 @@ rm -f "${BASE_ZIP}"
 )
 echo "    Clean base package: ${BASE_ZIP}"
 
-echo "==> [4/5] Applying EOSM2.103 patch to M-Film v0.2.3 and building module..."
+echo "==> [4/5] Applying EOSM2.103 & external profile loader patches to M-Film v0.2.3..."
 git -C "${MFILM_DIR}" apply --whitespace=nowarn "${REPO_ROOT}/patches/02-mfilm-eosm2.patch"
+git -C "${MFILM_DIR}" apply --whitespace=nowarn "${REPO_ROOT}/patches/03-mfilm-extprof-loader.patch"
 # Clean platform build directory before M-Film fork overlay
 make -C "${ML_DIR}/platform/EOSM2.103" clean
 ML_SRC="${ML_DIR}" bash "${MFILM_DIR}/ml-dev/build_fork.sh" EOSM2.103 --module

@@ -88,7 +88,23 @@ cd mfilm-eosm2
 python3 scripts/verify_m2_safety.py dist/02_EOSM2_MFilm_023_TestBuild.zip
 ```
 
-完整 5 项安全门禁审计结果见 [`docs/SAFETY_AUDIT_REPORT.md`](./docs/SAFETY_AUDIT_REPORT.md)。
+完整 6 项安全与协议合规门禁审计结果见 [`docs/SAFETY_AUDIT_REPORT.md`](./docs/SAFETY_AUDIT_REPORT.md)。
+
+---
+
+## 外置胶片配置加载器与协议隔离架构（GPL-2.0 / CC BY-SA 4.0）
+
+为在不向 GPL-2.0 固件树引入任何 GPL-3.0 代码的前提下支持第三方光谱胶片配置，本项目实现了严格的**协议防火墙 + SD 卡聚合（Aggregation）隔离架构**：
+
+1. **纯 GPL-2.0 净室固件端加载器（[`patches/03-mfilm-extprof-loader.patch`](./patches/03-mfilm-extprof-loader.patch)）**：
+   - 在 `ML/modules/filmos.mo` 中新增独立编写的 `fos_extprof.c` / `fos_extprof.h`。
+   - 开机或进入选卷架/机内暗房时，自动扫描 SD 卡 `ML/MFILM/profiles/*.cfg` 纯文本参数化胶片配置文件，动态追加至 M-Film 选卷列表。
+   - 在暗房显影时按需根据 `.cfg` 中的纯数值参数（`3×3` 线性色彩矩阵 + RGB 分通道广义 Logistic 色调曲线与反差参数 + `3×3` 显示输出矩阵）即时合成 `33×33×33` Cineon 3D LUT。
+   - **开机静态内存零占用**：全部解析缓冲与预设数组均在 `filmos.mo` 运行期通过相机临时内存池（`fos_port_alloc` / `tmp_malloc`）按需申请并及时释放，`autoexec.bin` 开机静态内存保持 `537,344 / 605,952 bytes`（余量 `67.0 KB`）纹丝不动。
+2. **宿主机端独立黑盒烘焙工具（[`scripts/bake_sd_profiles.py`](./scripts/bake_sd_profiles.py)）**：
+   - 将独立克隆的外部光谱模拟器（如 `andreavolpato/spektrafilm`）作为纯黑盒运行（关闭光晕、物理颗粒、眩光与自动曝光），输入 496 点合成测试图（24 色标准 ColorChecker + 6×6×6 RGB 色彩立方体 + 256 级对数灰阶斜坡）。
+   - 使用 `scipy.optimize.least_squares` 拟合输出纯文本 `ML/MFILM/profiles/*.cfg`，并自动生成遵循 **CC BY-SA 4.0** 的 `PROFILES_ATTRIBUTION.txt` 与色差报告 [`docs/SPEKTRAFILM_BAKE_REPORT.md`](./docs/SPEKTRAFILM_BAKE_REPORT.md)（20 款胶片 24 色 ColorChecker 平均 ΔE2000 = `2.42`，全图 496 点平均 ΔE2000 = `1.93`）。
+   - **本 GPL-2.0 源码仓库不混入任何受 CC BY-SA 4.0 约束的 `.cfg` 数据文件**；用户可自行运行 `scripts/bake_sd_profiles.py` 生成后拷贝至 SD 卡 `ML/MFILM/profiles/` 目录即可生效。
 
 ---
 
@@ -97,8 +113,8 @@ python3 scripts/verify_m2_safety.py dist/02_EOSM2_MFilm_023_TestBuild.zip
 本项目采用 **AI 辅助（Google Antigravity）+ 确定性静态审计** 的工程化流程完成跨代移植与集成：
 
 - **硬件地址零编造原则**：所有底层固件偏移均直接继承自经过实机验证的 EOS M2（1.0.3）移植分支（`ccritix/magic-lantern`），严禁 AI 推算或修改任何硬件地址。`platform/EOSM2.103/` 中的全部 **135 条 `0xFF...` 固件函数地址**（`stubs.S`）、`ROMBASEADDR = 0xFF0C0000`、`RESTARTSTART = 0x44C100`、显存基址及 `BGMT_*` 按键事件码均保持 100% 原值。
-- **确定性 Python 安全门禁**：每次构建打包前均强制运行 [`scripts/verify_m2_safety.py`](scripts/verify_m2_safety.py)，机械核验地址表一致性、DIGIC 5 启动内存余量（严格低于 `592 KB` 上限），并全局扫描确保**零自动改写相机 NVRAM Bootflag 的调用**。
-- **当前验证状态**：交叉编译与全项静态安全审计均已通过（当前处于 `Pre-release` 阶段）。在完成 EOS M2（1.0.3）真机冒烟测试前，请务必仅通过相机菜单的**“固件升级（Firmware Update）”**进行非持久化加载。
+- **确定性 6 项 Python 安全与合规门禁**：每次构建打包前均强制运行 [`scripts/verify_m2_safety.py`](scripts/verify_m2_safety.py)，机械核验地址表一致性、DIGIC 5 启动内存余量（严格低于 `592 KB` 上限）、**零自动改写相机 NVRAM Bootflag 调用**以及**零 GPL-3.0 / 第三方源码污染**。
+- **当前验证状态**：交叉编译与全项 6 道静态安全及协议合规审计均已通过（当前处于 `Pre-release` 阶段）。在完成 EOS M2（1.0.3）真机冒烟测试前，请务必仅通过相机菜单的**“固件升级（Firmware Update）”**进行非持久化加载。
 
 ---
 
@@ -114,4 +130,5 @@ python3 scripts/verify_m2_safety.py dist/02_EOSM2_MFilm_023_TestBuild.zip
 
 ## 开源协议
 
-本项目遵循 **GNU General Public License v2.0（GPL-2.0）** 开源协议（全文见 [`LICENSE`](./LICENSE)），与 Magic Lantern 及 M-Film 保持完全兼容。
+本仓库中的所有固件补丁、平台代码与构建脚本均遵循 **GNU General Public License v2.0（GPL-2.0）** 开源协议（全文见 [`LICENSE`](./LICENSE)），与 Magic Lantern 及 M-Film 保持完全兼容。通过 `scripts/bake_sd_profiles.py` 从 SpektraFilm 黑盒烘焙生成的外部 `.cfg` 数据文件属于独立的 CC BY-SA 4.0 数据资产，仅以 SD 卡聚合（Aggregation）方式分发，不纳入本 GPL-2.0 源码提交。
+

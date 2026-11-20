@@ -1,0 +1,844 @@
+diff --git a/ml-dev/build_fork.sh b/ml-dev/build_fork.sh
+index 00bbe1f..ca0f3b8 100644
+--- a/ml-dev/build_fork.sh
++++ b/ml-dev/build_fork.sh
+@@ -139,7 +139,7 @@ if [ -n "$MODULE" ]; then
+     cp "$HERE"/fork/module/{Makefile,README.rst} "$HERE"/fork/src/filmroll.{c,h} "$HERE"/fork/src/filmos_mod.h \
+        "$HERE"/filmos/fos*.{c,h} "$SRC"/src/fos_version.h "$MOD/"
+     sed -i 's/\r$//' "$MOD"/*.c "$MOD"/*.h
+-    OBJS="filmroll.o fos_gfx.o fos_film.o fos_ui.o fos_shelf.o fos_pages.o fos_hud.o fos_print.o"
++    OBJS="filmroll.o fos_gfx.o fos_film.o fos_extprof.o fos_ui.o fos_shelf.o fos_pages.o fos_hud.o fos_print.o"
+     if [ -n "$NODARK" ]; then OBJS="$OBJS fos_nodark.o"; else OBJS="$OBJS fos_dark.o fos_dev.o fos_lab.o fos_looks.o fos_jpeg.o"; fi
+     make -C "$MOD" FILMOS_PLATFORM="$PLAT" FILMOS_OBJS="$OBJS" FATAL_WARNINGS=y >> "$LOG" 2>&1 || { tail -40 "$LOG"; echo "the film OS module didn't build, see $LOG"; exit 1; }
+     # Only the module's entry points stay global: the loader refuses a module that defines a name
+diff --git a/ml-dev/filmos/fos.h b/ml-dev/filmos/fos.h
+index ab54746..4278777 100644
+--- a/ml-dev/filmos/fos.h
++++ b/ml-dev/filmos/fos.h
+@@ -76,6 +76,9 @@ extern int fos_nfilms;
+ #define FOS_FILM_FILE "FOSFILMS.BIN"
+ /* blob: the file's contents, kept while the films are used; 1 when usable */
+ int fos_films_load(const uint8_t *blob, int size);
++struct fos_look;
++/* Append runtime-loaded external film profiles after built-in + FOSFILMS.BIN */
++int fos_films_append_ext(const struct fos_film *extra_films, const struct fos_look *extra_looks, int count);
+ 
+ extern const int fos_exposure_choices[];        /* 36, 24, 12 */
+ #define FOS_NEXP 3
+diff --git a/ml-dev/filmos/fos_dev.c b/ml-dev/filmos/fos_dev.c
+index 219a633..419b86e 100644
+--- a/ml-dev/filmos/fos_dev.c
++++ b/ml-dev/filmos/fos_dev.c
+@@ -16,6 +16,7 @@
+ 
+ #include "fos.h"
+ #include "fos_dev.h"
++#include "fos_extprof.h"
+ #include "fos_jpeg.h"
+ #include <math.h>
+ #include <string.h>
+@@ -236,6 +237,16 @@ static int lut_load(const struct fos_look *f, int film)
+ static __attribute__((noinline)) int table_load(const struct fos_look *f, int film)
+ {
+     if (lut_film == film && lut_built >= NGRID) return 1;
++#ifndef FOS_DEV_TEST
++    const struct fos_extprof *ep = fos_extprof_find(f->key);
++    if (ep)
++    {
++        fos_extprof_build_lut(ep, tab->lut, GRID);
++        lut_film = film;
++        lut_built = NGRID;
++        return 1;
++    }
++#endif
+     lut_film = film;
+     lut_built = lut_load(f, film) ? NGRID : 0;
+     if (lut_built >= NGRID) return 1;
+diff --git a/ml-dev/filmos/fos_extprof.c b/ml-dev/filmos/fos_extprof.c
+new file mode 100644
+index 0000000..2a8e1f2
+--- /dev/null
++++ b/ml-dev/filmos/fos_extprof.c
+@@ -0,0 +1,579 @@
++/* fos_extprof.c: external film profile loader for M-Film (GPL-2.0).
++ *
++ * Clean-room implementation that scans ML/MFILM/profiles/ on the SD card
++ * for plain-text .cfg files, parses parametric color transforms (3x3 input
++ * matrix + per-channel generalized logistic tone curves + 3x3 output matrix),
++ * appends them to the runtime film catalog, and generates the Cineon-log 3D
++ * LUT on demand inside the darkroom.
++ *
++ * Memory policy: all buffers are allocated at filmos.mo runtime through
++ * fos_port_alloc() (camera tmp_malloc / shoot_malloc pool) and temporary
++ * buffers are freed immediately after parsing or LUT synthesis. Zero static
++ * boot memory is consumed in autoexec.bin.
++ */
++
++#include "fos_extprof.h"
++#include <math.h>
++#include <string.h>
++
++#define CFG_BUF_SIZE   4096
++#define NAME_MAX_LEN   64
++#define CURVE_LUT_N    256
++#define CURVE_T_MIN    (-14.0f)
++#define CURVE_T_MAX    (5.0f)
++#define CIN_BLACK_VAL  0.0108f
++
++static struct fos_extprof *ext_profiles;
++static int ext_count;
++
++/* ---------------------------------------------------------------- tiny parsers */
++
++static int is_space(char c)
++{
++    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
++}
++
++static void copy_str(char *dst, int size, const char *src, int n)
++{
++    int i = 0;
++    for (; i < n && i < size - 1 && src[i]; i++) dst[i] = src[i];
++    if (size > 0) dst[i] = 0;
++}
++
++static char *trim_inplace(char *s)
++{
++    while (*s && is_space(*s)) s++;
++    int n = (int) strlen(s);
++    while (n > 0 && is_space(s[n - 1])) s[--n] = 0;
++    return s;
++}
++
++static int has_cfg_ext(const char *name)
++{
++    int n = (int) strlen(name);
++    if (n < 5) return 0;
++    const char *e = name + n - 4;
++    if (e[0] != '.') return 0;
++    char c1 = e[1] >= 'A' && e[1] <= 'Z' ? (char) (e[1] + 32) : e[1];
++    char c2 = e[2] >= 'A' && e[2] <= 'Z' ? (char) (e[2] + 32) : e[2];
++    char c3 = e[3] >= 'A' && e[3] <= 'Z' ? (char) (e[3] + 32) : e[3];
++    return c1 == 'c' && c2 == 'f' && c3 == 'g';
++}
++
++static int parse_int(const char *s)
++{
++    while (*s && is_space(*s)) s++;
++    int sign = 1;
++    if (*s == '-') { sign = -1; s++; }
++    else if (*s == '+') { s++; }
++    int v = 0;
++    while (*s >= '0' && *s <= '9')
++    {
++        v = v * 10 + (*s - '0');
++        s++;
++    }
++    return sign * v;
++}
++
++static float parse_float_one(const char *s, const char **endp)
++{
++    while (*s && (is_space(*s) || *s == ',')) s++;
++    float sign = 1.0f;
++    if (*s == '-') { sign = -1.0f; s++; }
++    else if (*s == '+') { s++; }
++
++    float val = 0.0f;
++    while (*s >= '0' && *s <= '9')
++    {
++        val = val * 10.0f + (float) (*s - '0');
++        s++;
++    }
++    if (*s == '.')
++    {
++        s++;
++        float scale = 0.1f;
++        while (*s >= '0' && *s <= '9')
++        {
++            val += (float) (*s - '0') * scale;
++            scale *= 0.1f;
++            s++;
++        }
++    }
++    if (*s == 'e' || *s == 'E')
++    {
++        s++;
++        int esign = 1;
++        if (*s == '-') { esign = -1; s++; }
++        else if (*s == '+') { s++; }
++        int expv = 0;
++        while (*s >= '0' && *s <= '9')
++        {
++            expv = expv * 10 + (*s - '0');
++            s++;
++        }
++        if (expv > 30) expv = 30;
++        float p10 = 1.0f;
++        for (int i = 0; i < expv; i++) p10 *= 10.0f;
++        if (esign < 0) val /= p10;
++        else val *= p10;
++    }
++    if (endp) *endp = s;
++    return sign * val;
++}
++
++static int parse_floats(const char *s, float *out, int max_n)
++{
++    int n = 0;
++    const char *p = s;
++    while (n < max_n && *p)
++    {
++        while (*p && (is_space(*p) || *p == ',')) p++;
++        if (!*p) break;
++        const char *next = p;
++        float v = parse_float_one(p, &next);
++        if (next == p) break;
++        out[n++] = v;
++        p = next;
++    }
++    return n;
++}
++
++static void parse_ink(const char *s, uint8_t ink[2])
++{
++    float vals[2] = { 0.0f, 128.0f };
++    if (parse_floats(s, vals, 2) >= 2)
++    {
++        ink[0] = (uint8_t) fos_clamp((int) vals[0], 0, 15);
++        ink[1] = (uint8_t) fos_clamp((int) vals[1], 0, 255);
++    }
++}
++
++/* ---------------------------------------------------------------- profile init & parse */
++
++static void extprof_set_defaults(struct fos_extprof *ep, const char *filename)
++{
++    memset(ep, 0, sizeof(*ep));
++
++    /* Derive default key/name from filename without .cfg */
++    int n = (int) strlen(filename);
++    if (n > 4) n -= 4;
++    copy_str(ep->key, sizeof(ep->key), filename, n);
++    copy_str(ep->brand, sizeof(ep->brand), "EXT", 3);
++    copy_str(ep->name, sizeof(ep->name), ep->key, (int) strlen(ep->key));
++    copy_str(ep->shortname, sizeof(ep->shortname), ep->key, (int) strlen(ep->key));
++    copy_str(ep->process, sizeof(ep->process), "C-41", 4);
++    copy_str(ep->desc, sizeof(ep->desc), "External parametric film profile", 32);
++
++    /* Identity 3x3 matrices */
++    ep->matrix[0] = ep->matrix[4] = ep->matrix[8] = 1.0f;
++    ep->out_matrix[0] = ep->out_matrix[4] = ep->out_matrix[8] = 1.0f;
++
++    /* Neutral tone curve defaults */
++    for (int c = 0; c < 3; c++)
++    {
++        ep->contrast[c] = 0.25f;
++        ep->pivot[c] = 0.0f;
++        ep->black[c] = 0.01f;
++        ep->white[c] = 0.99f;
++        ep->gamma[c] = 1.0f;
++        ep->out_bias[c] = 0.0f;
++    }
++
++    /* Default canister label */
++    ep->label.style = FOS_LABEL_CAP;
++    ep->label.leader = 0;
++    ep->label.bg[0] = 0;     ep->label.bg[1] = 220;
++    ep->label.band[0] = 1;   ep->label.band[1] = 175;
++    ep->label.accent[0] = 2; ep->label.accent[1] = 150;
++    ep->label.text[0] = 0;   ep->label.text[1] = 24;
++    ep->label.num[0] = 3;    ep->label.num[1] = 145;
++    copy_str(ep->label.top, sizeof(ep->label.top), "EXTERNAL", 8);
++    copy_str(ep->label.word, sizeof(ep->label.word), ep->name, 13);
++    copy_str(ep->label.num_s, sizeof(ep->label.num_s), "400", 3);
++    copy_str(ep->label.sub, sizeof(ep->label.sub), "CFG PROFILE", 11);
++
++    /* Default film metadata */
++    ep->film.box_iso = 400;
++    ep->film.iso = 400;
++    ep->film.picstyle = PS_STANDARD;
++    ep->film.contrast = 0;
++    ep->film.saturation = 0;
++    ep->film.color_tone = 0;
++    ep->film.sharpness = 2;
++    ep->film.kelvin = 5500;
++    ep->film.grain = 2;
++    ep->film.punch = 3;
++    ep->film.colour = 3;
++    ep->film.warmth = 3;
++    ep->film.group = FOS_GROUP_COLOUR;
++
++    /* Default look metadata */
++    ep->look.balance = 5500;
++    ep->look.slide = 0;
++    ep->look.ev = 0.0f;
++    ep->look.sat = 1.0f;
++    ep->look.grain = 0.0f;
++    ep->look.grain_size = 1.0f;
++    ep->look.halation = 0.0f;
++    ep->look.mono = 0;
++    ep->look.mono_mix[0] = 0.2126f;
++    ep->look.mono_mix[1] = 0.7152f;
++    ep->look.mono_mix[2] = 0.0722f;
++}
++
++static int extprof_parse_buf(struct fos_extprof *ep, char *buf, int len)
++{
++    int has_matrix = 0;
++    int has_contrast = 0;
++    char *p = buf;
++    char *end = buf + len;
++
++    while (p < end)
++    {
++        char *eol = p;
++        while (eol < end && *eol != '\n' && *eol != '\r') eol++;
++        char *next = eol;
++        while (next < end && (*next == '\n' || *next == '\r')) next++;
++        *eol = 0;
++
++        char *line = trim_inplace(p);
++        p = next;
++        if (!line[0] || line[0] == '#' || line[0] == ';') continue;
++
++        char *eq = strchr(line, '=');
++        if (!eq) continue;
++        *eq = 0;
++        char *k = trim_inplace(line);
++        char *v = trim_inplace(eq + 1);
++        if (!k[0]) continue;
++
++        if (!strcmp(k, "key"))            copy_str(ep->key, sizeof(ep->key), v, (int) strlen(v));
++        else if (!strcmp(k, "brand"))     copy_str(ep->brand, sizeof(ep->brand), v, (int) strlen(v));
++        else if (!strcmp(k, "name"))      copy_str(ep->name, sizeof(ep->name), v, (int) strlen(v));
++        else if (!strcmp(k, "shortname")) copy_str(ep->shortname, sizeof(ep->shortname), v, (int) strlen(v));
++        else if (!strcmp(k, "process"))   copy_str(ep->process, sizeof(ep->process), v, (int) strlen(v));
++        else if (!strcmp(k, "desc"))      copy_str(ep->desc, sizeof(ep->desc), v, (int) strlen(v));
++        else if (!strcmp(k, "box_iso"))   ep->film.box_iso = parse_int(v);
++        else if (!strcmp(k, "iso"))       ep->film.iso = parse_int(v);
++        else if (!strcmp(k, "kelvin"))    { ep->film.kelvin = parse_int(v); ep->look.balance = ep->film.kelvin; }
++        else if (!strcmp(k, "group"))     ep->film.group = fos_clamp(parse_int(v), 0, FOS_NGROUPS - 1);
++        else if (!strcmp(k, "slide"))     ep->look.slide = parse_int(v) ? 1 : 0;
++        else if (!strcmp(k, "mono"))
++        {
++            ep->look.mono = parse_int(v) ? 1 : 0;
++            if (ep->look.mono) { ep->film.picstyle = PS_MONO; ep->label.leader = 90; }
++        }
++        else if (!strcmp(k, "ev"))        ep->look.ev = parse_float_one(v, 0);
++        else if (!strcmp(k, "sat"))       ep->look.sat = parse_float_one(v, 0);
++        else if (!strcmp(k, "grain"))     ep->film.grain = (uint8_t) fos_clamp(parse_int(v), 0, 5);
++        else if (!strcmp(k, "punch"))     ep->film.punch = (uint8_t) fos_clamp(parse_int(v), 0, 5);
++        else if (!strcmp(k, "colour"))    ep->film.colour = (uint8_t) fos_clamp(parse_int(v), 0, 5);
++        else if (!strcmp(k, "warmth"))    ep->film.warmth = (uint8_t) fos_clamp(parse_int(v), 0, 5);
++        else if (!strcmp(k, "matrix"))
++        {
++            if (parse_floats(v, ep->matrix, 9) == 9) has_matrix = 1;
++        }
++        else if (!strcmp(k, "out_matrix"))
++        {
++            parse_floats(v, ep->out_matrix, 9);
++        }
++        else if (!strcmp(k, "out_bias"))
++        {
++            parse_floats(v, ep->out_bias, 3);
++        }
++        else if (!strcmp(k, "contrast"))
++        {
++            if (parse_floats(v, ep->contrast, 3) == 3) has_contrast = 1;
++        }
++        else if (!strcmp(k, "pivot"))     parse_floats(v, ep->pivot, 3);
++        else if (!strcmp(k, "black"))     parse_floats(v, ep->black, 3);
++        else if (!strcmp(k, "white"))     parse_floats(v, ep->white, 3);
++        else if (!strcmp(k, "gamma"))     parse_floats(v, ep->gamma, 3);
++        else if (!strcmp(k, "label_style")) ep->label.style = (uint8_t) fos_clamp(parse_int(v), 0, 2);
++        else if (!strcmp(k, "label_top"))   copy_str(ep->label.top, sizeof(ep->label.top), v, (int) strlen(v));
++        else if (!strcmp(k, "label_word"))  copy_str(ep->label.word, sizeof(ep->label.word), v, (int) strlen(v));
++        else if (!strcmp(k, "label_num"))   copy_str(ep->label.num_s, sizeof(ep->label.num_s), v, (int) strlen(v));
++        else if (!strcmp(k, "label_sub"))   copy_str(ep->label.sub, sizeof(ep->label.sub), v, (int) strlen(v));
++        else if (!strcmp(k, "label_bg"))    parse_ink(v, ep->label.bg);
++        else if (!strcmp(k, "label_band"))  parse_ink(v, ep->label.band);
++        else if (!strcmp(k, "label_accent")) parse_ink(v, ep->label.accent);
++        else if (!strcmp(k, "label_text"))  parse_ink(v, ep->label.text);
++        else if (!strcmp(k, "label_num_ink")) parse_ink(v, ep->label.num);
++    }
++
++    if (!ep->key[0] || !has_matrix || !has_contrast)
++        return 0;
++
++    if (ep->film.iso < 100) ep->film.iso = 100;
++    for (int c = 0; c < 3; c++)
++    {
++        ep->look.contrast[c] = ep->contrast[c];
++        ep->look.pivot[c] = ep->pivot[c];
++        ep->look.black[c] = ep->black[c];
++        ep->look.white[c] = ep->white[c];
++        if (ep->gamma[c] < 0.05f) ep->gamma[c] = 0.05f;
++    }
++
++    ep->film.key = ep->key;
++    ep->film.brand = ep->brand;
++    ep->film.name = ep->name;
++    ep->film.process = ep->process;
++    ep->film.desc = ep->desc;
++    ep->film.shortname = ep->shortname;
++    ep->film.label = &ep->label;
++    ep->look.key = ep->key;
++    return 1;
++}
++
++/* ---------------------------------------------------------------- directory scan */
++
++struct scan_ctx
++{
++    char (*names)[NAME_MAX_LEN];
++    int count;
++};
++
++static int scan_cb(void *vctx, const char *name, int is_dir)
++{
++    struct scan_ctx *ctx = (struct scan_ctx *) vctx;
++    if (is_dir || !name || name[0] == '.') return 1;
++    if (!has_cfg_ext(name)) return 1;
++    if (ctx->count >= FOS_EXTPROF_MAX) return 0;
++    copy_str(ctx->names[ctx->count], NAME_MAX_LEN, name, (int) strlen(name));
++    ctx->count++;
++    return 1;
++}
++
++static void sort_names(char (*names)[NAME_MAX_LEN], int n)
++{
++    char tmp[NAME_MAX_LEN];
++    for (int i = 1; i < n; i++)
++    {
++        memcpy(tmp, names[i], NAME_MAX_LEN);
++        int j = i - 1;
++        while (j >= 0 && strcmp(names[j], tmp) > 0)
++        {
++            memcpy(names[j + 1], names[j], NAME_MAX_LEN);
++            j--;
++        }
++        memcpy(names[j + 1], tmp, NAME_MAX_LEN);
++    }
++}
++
++void fos_extprof_free_all(void)
++{
++    if (ext_profiles)
++    {
++        fos_port_free(ext_profiles);
++        ext_profiles = 0;
++    }
++    ext_count = 0;
++}
++
++int fos_extprof_count(void)
++{
++    return ext_count;
++}
++
++const struct fos_extprof *fos_extprof_find(const char *key)
++{
++    if (!key || !ext_profiles) return 0;
++    for (int i = 0; i < ext_count; i++)
++        if (!strcmp(ext_profiles[i].key, key))
++            return &ext_profiles[i];
++    return 0;
++}
++
++int fos_extprof_load_all(void)
++{
++    char dir[96];
++    snprintf(dir, sizeof(dir), "%s%s", fos_port_card(), FOS_EXTPROF_DIR);
++
++    char (*names)[NAME_MAX_LEN] = fos_port_alloc(FOS_EXTPROF_MAX * NAME_MAX_LEN);
++    if (!names) return 0;
++
++    struct scan_ctx ctx = { names, 0 };
++    if (fos_port_list(dir, scan_cb, &ctx) < 0 || ctx.count <= 0)
++    {
++        fos_port_free(names);
++        return 0;
++    }
++    sort_names(names, ctx.count);
++
++    struct fos_extprof *arr = fos_port_alloc(ctx.count * (int) sizeof(*arr));
++    char *fbuf = fos_port_alloc(CFG_BUF_SIZE);
++    if (!arr || !fbuf)
++    {
++        fos_port_free(fbuf);
++        fos_port_free(arr);
++        fos_port_free(names);
++        return 0;
++    }
++
++    int loaded = 0;
++    for (int i = 0; i < ctx.count; i++)
++    {
++        char path[160];
++        snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
++        void *fp = fos_port_open(path, 0);
++        if (!fp) continue;
++        int n = fos_port_read(fp, fbuf, CFG_BUF_SIZE - 1);
++        fos_port_close(fp);
++        if (n <= 0) continue;
++        fbuf[n] = 0;
++
++        struct fos_extprof *ep = &arr[loaded];
++        extprof_set_defaults(ep, names[i]);
++        if (extprof_parse_buf(ep, fbuf, n))
++            loaded++;
++    }
++
++    fos_port_free(fbuf);
++    fos_port_free(names);
++
++    if (loaded <= 0)
++    {
++        fos_port_free(arr);
++        return 0;
++    }
++
++    /* Commit new external profile table and append to fos_films / fos_more_looks */
++    struct fos_film *flist = fos_port_alloc(loaded * (int) sizeof(*flist));
++    struct fos_look *llist = fos_port_alloc(loaded * (int) sizeof(*llist));
++    if (!flist || !llist)
++    {
++        fos_port_free(flist);
++        fos_port_free(llist);
++        fos_port_free(arr);
++        return 0;
++    }
++
++    for (int i = 0; i < loaded; i++)
++    {
++        flist[i] = arr[i].film;
++        llist[i] = arr[i].look;
++    }
++
++    if (!fos_films_append_ext(flist, llist, loaded))
++    {
++        fos_port_free(flist);
++        fos_port_free(llist);
++        fos_port_free(arr);
++        return 0;
++    }
++
++    fos_port_free(flist);
++    fos_port_free(llist);
++
++    fos_extprof_free_all();
++    ext_profiles = arr;
++    ext_count = loaded;
++
++    char msg[96];
++    snprintf(msg, sizeof(msg), "extprof: loaded %d external profiles from %s", loaded, FOS_EXTPROF_DIR);
++    fos_port_log(msg);
++    return loaded;
++}
++
++/* ---------------------------------------------------------------- on-camera 3D LUT synthesis */
++
++static float cineon_to_lin(float v)
++{
++    float x = powf(10.0f, (v * 1023.0f - 685.0f) / 300.0f);
++    float lin = (x - CIN_BLACK_VAL) / (1.0f - CIN_BLACK_VAL);
++    return lin > 0.0f ? lin : 0.0f;
++}
++
++static float eval_channel_curve(float t, float slope, float pivot, float black, float white, float gamma)
++{
++    float span = white - black;
++    if (span < 0.05f) span = 0.05f;
++    float k = 4.0f * slope / span;
++    float z = -k * (t - pivot);
++    if (z > 40.0f) z = 40.0f;
++    if (z < -40.0f) z = -40.0f;
++    float s = 1.0f / (1.0f + expf(z));
++    if (gamma != 1.0f)
++        s = powf(s > 1e-7f ? s : 1e-7f, gamma);
++    return black + (white - black) * s;
++}
++
++void fos_extprof_build_lut(const struct fos_extprof *ep, uint8_t (*lut)[3], int grid)
++{
++    if (!ep || !lut || grid <= 1) return;
++
++    /* Precompute 1D Cineon-to-linear table (grid entries) and 1D per-channel
++     * log2-domain tone curves (3 x 256 entries) using temporary pool memory. */
++    float *cin_lin = fos_port_alloc(grid * (int) sizeof(float));
++    float *clut = fos_port_alloc(3 * CURVE_LUT_N * (int) sizeof(float));
++    if (!cin_lin || !clut)
++    {
++        fos_port_free(cin_lin);
++        fos_port_free(clut);
++        return;
++    }
++
++    float inv_gm1 = 1.0f / (float) (grid - 1);
++    for (int i = 0; i < grid; i++)
++        cin_lin[i] = cineon_to_lin((float) i * inv_gm1);
++
++    float t_span = CURVE_T_MAX - CURVE_T_MIN;
++    float t_step = t_span / (float) (CURVE_LUT_N - 1);
++    for (int c = 0; c < 3; c++)
++    {
++        for (int i = 0; i < CURVE_LUT_N; i++)
++        {
++            float t = CURVE_T_MIN + (float) i * t_step;
++            clut[c * CURVE_LUT_N + i] = eval_channel_curve(
++                t, ep->contrast[c], ep->pivot[c], ep->black[c], ep->white[c], ep->gamma[c]);
++        }
++    }
++
++    const float *m = ep->matrix;
++    const float *om = ep->out_matrix;
++    const float *ob = ep->out_bias;
++    const float inv_t_step = (float) (CURVE_LUT_N - 1) / t_span;
++
++    int idx = 0;
++    for (int bi = 0; bi < grid; bi++)
++    {
++        float lb = cin_lin[bi];
++        for (int gi = 0; gi < grid; gi++)
++        {
++            float lg = cin_lin[gi];
++            for (int ri = 0; ri < grid; ri++, idx++)
++            {
++                float lr = cin_lin[ri];
++                float v[3];
++                for (int c = 0; c < 3; c++)
++                {
++                    float u = m[c * 3 + 0] * lr + m[c * 3 + 1] * lg + m[c * 3 + 2] * lb;
++                    if (u < 1e-6f) u = 1e-6f;
++                    float t = log2f(u * (1.0f / 0.18f));
++                    float pos = (t - CURVE_T_MIN) * inv_t_step;
++                    if (pos <= 0.0f)
++                        v[c] = clut[c * CURVE_LUT_N];
++                    else if (pos >= (float) (CURVE_LUT_N - 1))
++                        v[c] = clut[c * CURVE_LUT_N + (CURVE_LUT_N - 1)];
++                    else
++                    {
++                        int k0 = (int) pos;
++                        float f = pos - (float) k0;
++                        float a = clut[c * CURVE_LUT_N + k0];
++                        float b = clut[c * CURVE_LUT_N + k0 + 1];
++                        v[c] = a + (b - a) * f;
++                    }
++                }
++                for (int c = 0; c < 3; c++)
++                {
++                    float y = om[c * 3 + 0] * v[0] + om[c * 3 + 1] * v[1] + om[c * 3 + 2] * v[2] + ob[c];
++                    int q = (int) (y * 255.0f + 0.5f);
++                    lut[idx][c] = (uint8_t) (q < 0 ? 0 : q > 255 ? 255 : q);
++                }
++            }
++        }
++    }
++
++    fos_port_free(clut);
++    fos_port_free(cin_lin);
++}
+diff --git a/ml-dev/filmos/fos_extprof.h b/ml-dev/filmos/fos_extprof.h
+new file mode 100644
+index 0000000..5409928
+--- /dev/null
++++ b/ml-dev/filmos/fos_extprof.h
+@@ -0,0 +1,66 @@
++/* fos_extprof.h: external film profile loader for M-Film (GPL-2.0).
++ *
++ * Scans ML/MFILM/profiles/ on the SD card for plain-text .cfg parametric
++ * film profiles (3x3 color matrix + per-channel tone curves & contrast),
++ * dynamically appends them to the runtime film catalog, and synthesizes
++ * the 33x33x33 Cineon 3D LUT on demand in the darkroom.
++ *
++ * All allocations use the filmos.mo runtime memory pool (fos_port_alloc /
++ * fos_port_free); zero bytes are placed in autoexec.bin boot memory.
++ */
++
++#ifndef _fos_extprof_h_
++#define _fos_extprof_h_
++
++#include "fos.h"
++#include "fos_dev.h"
++
++#define FOS_EXTPROF_DIR  "ML/MFILM/profiles"
++#define FOS_EXTPROF_MAX  48
++
++struct fos_extprof
++{
++    char key[24];
++    char brand[16];
++    char name[28];
++    char shortname[24];
++    char process[8];
++    char desc[48];
++    struct fos_label label;
++    struct fos_film film;
++    struct fos_look look;
++
++    /* Parametric color model:
++     *   1. u_c = max(1e-6, sum_j matrix[c][j] * lin_j)
++     *   2. t_c = log2(u_c / 0.18) - pivot[c]
++     *   3. v_c = black[c] + (white[c] - black[c]) / (1 + exp(-k_c * t_c))^gamma[c]
++     *      where k_c = 4.0 * contrast[c] / max(white[c] - black[c], 0.05)
++     *   4. y_c = clamp(sum_j out_matrix[c][j] * v_j + out_bias[c], 0, 1)
++     */
++    float matrix[9];
++    float contrast[3];
++    float pivot[3];
++    float black[3];
++    float white[3];
++    float gamma[3];
++    float out_matrix[9];
++    float out_bias[3];
++};
++
++/* Scan ML/MFILM/profiles/ (.cfg files) on the SD card and append valid profiles
++ * to fos_films / fos_more_looks. Returns number of external profiles loaded. */
++int fos_extprof_load_all(void);
++
++/* Release all dynamically allocated external profile storage. */
++void fos_extprof_free_all(void);
++
++/* Number of currently loaded external profiles. */
++int fos_extprof_count(void);
++
++/* Look up an external profile by its film key (NULL if not an external profile). */
++const struct fos_extprof *fos_extprof_find(const char *key);
++
++/* Build a grid x grid x grid Cineon-log 3D LUT in lut[grid^3][3] from ep. */
++void fos_extprof_build_lut(const struct fos_extprof *ep, uint8_t (*lut)[3], int grid);
++
++#endif
+diff --git a/ml-dev/filmos/fos_film.c b/ml-dev/filmos/fos_film.c
+index 4712594..f6a57f0 100644
+--- a/ml-dev/filmos/fos_film.c
++++ b/ml-dev/filmos/fos_film.c
+@@ -69,6 +69,11 @@ struct film_rec
+     uint8_t look[LOOK_BYTES];
+ };
+ 
++static struct fos_film *dyn_films;
++static struct fos_look *dyn_looks;
++static int base_nfilms = NBUILTIN;
++static int base_nmore_looks = 0;
++
+ int fos_films_load(const uint8_t *blob, int size)
+ {
+     if (!blob || size < 12 || memcmp(blob, "FOSM", 4) || blob[4] != 1) return 0;
+@@ -93,10 +98,46 @@ int fos_films_load(const uint8_t *blob, int size)
+         memcpy((uint8_t *) &looks[i] + LOOK_FROM, r->look, LOOK_BYTES);
+         looks[i].nhues = fos_clamp(looks[i].nhues, 0, 4);
+     }
++    fos_port_free(dyn_films);
++    fos_port_free(dyn_looks);
++    dyn_films = all;
++    dyn_looks = looks;
+     fos_films = all;
+     fos_nfilms = NBUILTIN + n;
+     fos_more_looks = looks;
+     fos_nmore_looks = n;
++    base_nfilms = NBUILTIN + n;
++    base_nmore_looks = n;
++    return 1;
++}
++
++int fos_films_append_ext(const struct fos_film *extra_films, const struct fos_look *extra_looks, int count)
++{
++    if (!extra_films || !extra_looks || count <= 0) return 0;
++    int total_f = base_nfilms + count;
++    int total_l = base_nmore_looks + count;
++    struct fos_film *all = fos_port_alloc(total_f * (int) sizeof(*all));
++    struct fos_look *looks = fos_port_alloc(total_l * (int) sizeof(*looks));
++    if (!all || !looks)
++    {
++        fos_port_free(all);
++        fos_port_free(looks);
++        return 0;
++    }
++    memcpy(all, fos_films, base_nfilms * sizeof(*all));
++    memcpy(all + base_nfilms, extra_films, count * sizeof(*all));
++    if (base_nmore_looks > 0 && fos_more_looks)
++        memcpy(looks, fos_more_looks, base_nmore_looks * sizeof(*looks));
++    memcpy(looks + base_nmore_looks, extra_looks, count * sizeof(*looks));
++
++    fos_port_free(dyn_films);
++    fos_port_free(dyn_looks);
++    dyn_films = all;
++    dyn_looks = looks;
++    fos_films = all;
++    fos_nfilms = total_f;
++    fos_more_looks = looks;
++    fos_nmore_looks = total_l;
+     return 1;
+ }
+ 
+diff --git a/ml-dev/fork/src/filmos_mod.h b/ml-dev/fork/src/filmos_mod.h
+index fa9c573..3897e9d 100644
+--- a/ml-dev/fork/src/filmos_mod.h
++++ b/ml-dev/fork/src/filmos_mod.h
+@@ -104,6 +104,7 @@ static unsigned int filmos_init()
+ 
+ static unsigned int filmos_deinit()
+ {
++    fos_extprof_free_all();
+     return 0;
+ }
+ 
+diff --git a/ml-dev/fork/src/filmroll.c b/ml-dev/fork/src/filmroll.c
+index 5f198bc..41de9c6 100644
+--- a/ml-dev/fork/src/filmroll.c
++++ b/ml-dev/fork/src/filmroll.c
+@@ -66,6 +66,7 @@
+ #include "filmroll.h"
+ #include "fos.h"
+ #include "fos_dev.h"
++#include "fos_extprof.h"
+ 
+ #include <stdarg.h>
+ 
+@@ -788,6 +789,9 @@ static void ui_task(int open)
+     DBG_STATE("film os: open");
+     memset(&stat_all, 0, sizeof(stat_all));
+ 
++    if (fos_extprof_count() == 0)
++        fos_extprof_load_all();
++
+     fos_ui_run(open);
+ 
+     film_ui_close();
+@@ -2174,20 +2178,24 @@ static void load_films()
+     if (!raw)
+     {
+         dbg("films: ML/DATA/%s not found, the built-in ones only", FOS_FILM_FILE);
+-        return;
+     }
+-    uint8_t *blob = malloc(size);
+-    if (blob)
++    else
+     {
+-        memcpy(blob, raw, size);
+-        if (!fos_films_load(blob, size))
++        uint8_t *blob = malloc(size);
++        if (blob)
+         {
+-            free(blob);
+-            blob = 0;
++            memcpy(blob, raw, size);
++            if (!fos_films_load(blob, size))
++            {
++                free(blob);
++                blob = 0;
++            }
+         }
++        fio_free(raw);
++        dbg("films: %d (%d bytes, %s)", fos_nfilms, size, blob ? "loaded" : "not usable");
+     }
+-    fio_free(raw);
+-    dbg("films: %d (%d bytes, %s)", fos_nfilms, size, blob ? "loaded" : "not usable");
++    int ext_n = fos_extprof_load_all();
++    dbg("films: %d external profiles appended (total %d)", ext_n, fos_nfilms);
+ }
+ 
+ /* the film OS is the camera's start screen */
