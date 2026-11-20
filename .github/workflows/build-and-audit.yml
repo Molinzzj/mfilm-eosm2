@@ -21,7 +21,6 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             gcc-arm-none-eabi \
             binutils-arm-none-eabi \
-            libnewlib-arm-none-eabi \
             gcc \
             make \
             git \
@@ -29,7 +28,27 @@ jobs:
             python3-pip \
             zip \
             unzip
-          arm-none-eabi-gcc --version | head -n 2
+
+      - name: Cache xPack GNU Arm Embedded GCC 12.3.1-1.2
+        id: cache-xpack
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/xpack-arm-none-eabi-gcc-12.3.1-1.2
+          key: ${{ runner.os }}-xpack-arm-12.3.1-1.2
+
+      - name: Set up xPack GNU Arm Embedded GCC 12.3.1-1.2
+        run: |
+          XPACK_VER="12.3.1-1.2"
+          XPACK_DIR="${HOME}/.local/opt/xpack-arm-none-eabi-gcc-${XPACK_VER}"
+          if [ ! -x "${XPACK_DIR}/bin/arm-none-eabi-gcc" ]; then
+            mkdir -p "${HOME}/.local/opt"
+            curl -fsSL -L -o /tmp/xpack-arm.tar.gz \
+              "https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v${XPACK_VER}/xpack-arm-none-eabi-gcc-${XPACK_VER}-linux-x64.tar.gz"
+            tar -xzf /tmp/xpack-arm.tar.gz -C "${HOME}/.local/opt"
+            rm -f /tmp/xpack-arm.tar.gz
+          fi
+          echo "${XPACK_DIR}/bin" >> "${GITHUB_PATH}"
+          "${XPACK_DIR}/bin/arm-none-eabi-gcc" --version | head -n 2
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
